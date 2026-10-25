@@ -5,6 +5,8 @@ import './style.css';
 import { setupTraffic, TRAFFIC_LAYER } from './traffic.js';
 import { addSatellite, setupBasemapSwitch } from './basemap.js';
 import { setupDriving } from './drive.js';
+import { placeGlyph, setupPlaces } from './places.js';
+import { showSplash } from './splash.js';
 
 // MapLibre 6 finds its worker next to its own file, which Vite moves; point at it explicitly.
 maplibregl.setWorkerUrl(workerUrl);
@@ -17,7 +19,6 @@ const COLORS = {
   land: '#000000',
   water: '#0c1419',
   buildings: '#111114',
-  space: '#000000',
 };
 
 // Zoom to use when a search result has no bounding box.
@@ -63,52 +64,55 @@ async function loadStyle() {
     if (layer.id === 'building-top') layer.paint['fill-color'] = COLORS.buildings;
   }
 
-  style.projection = { type: 'globe' };
-  style.sky = {
-    'sky-color': COLORS.space,
-    'horizon-color': COLORS.space,
-    'fog-color': COLORS.space,
-    // Faint glow around the globe when zoomed out, gone once you are close.
-    'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 0.45, 4, 0.2, 7, 0],
-  };
   addSatellite(style);
   return style;
 }
 
 // ---------- Map ----------
 
+// The start screen goes up at once; the map loads behind it meanwhile.
+const started = showSplash();
+const sharedView = Boolean(location.hash); // a link that already says where to look
+
 let map;
 try {
+  // A flat, north-up map: no globe, no tilting, no rotating by hand.
+  // (Driving mode still turns it with the bike.)
   map = new maplibregl.Map({
     container: mapEl,
     style: await loadStyle(),
-    center: [10, 30],
-    zoom: 1.6,
+    center: [8, 45],
+    zoom: 4,
     hash: true,
     attributionControl: { compact: true },
-    maxPitch: 75,
+    maxPitch: 0,
+    dragRotate: false,
+    pitchWithRotate: false,
+    touchPitch: false,
   });
+  map.touchZoomRotate.disableRotation();
+  map.keyboard.disableRotation();
 } catch (err) {
   console.error(err);
   mapEl.innerHTML = '<p class="map-error">No se pudo cargar el mapa. Revisa la conexión y recarga.</p>';
   throw err;
 }
 
-map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
-map.addControl(new maplibregl.GlobeControl(), 'top-right');
-map.addControl(
-  new maplibregl.GeolocateControl({
-    positionOptions: { enableHighAccuracy: true },
-    trackUserLocation: true,
-  }),
-  'top-right',
-);
+const mapReady = new Promise((resolve) => map.once('load', resolve));
+
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+const geolocate = new maplibregl.GeolocateControl({
+  positionOptions: { enableHighAccuracy: true },
+  trackUserLocation: true,
+});
+map.addControl(geolocate, 'top-right');
 map.addControl(new maplibregl.FullscreenControl(), 'top-right');
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
 const traffic = setupTraffic(map);
 const basemap = setupBasemapSwitch(map);
 const drive = setupDriving(map, traffic, basemap);
+const places = setupPlaces(map, { onGo: (place) => drive.planTo([place.lng, place.lat], place.name) });
 
 // ---------- Coordinates under the cursor ----------
 
@@ -164,7 +168,13 @@ function dropPin(lngLat, title) {
     pin.remove();
     drive.planTo([lng, lat], title || 'Punto en el mapa');
   };
-  actions.append(goBtn, copyBtn, removeBtn);
+  const saveBtn = document.createElement('button');
+  saveBtn.textContent = 'Guardar';
+  saveBtn.onclick = () => {
+    pin.remove();
+    places.save([lng, lat], title);
+  };
+  actions.append(goBtn, saveBtn, copyBtn, removeBtn);
 
   box.append(coords, actions);
   popup.setDOMContent(box);
@@ -199,9 +209,9 @@ driveBtn.addEventListener('click', () => {
 });
 document.body.append(driveBtn);
 
-// ---------- Search (Photon geocoder) ----------
+// ---------- Search: your saved places first, then Photon ----------
 
-let results = [];
+let results = []; // { place } or { feature }
 let active = -1;
 let pending;
 let debounce;
@@ -213,26 +223,45 @@ function describe(feature) {
   return { name, detail: detail.join(', ') };
 }
 
+const placeResults = (query) =>
+  places
+    .find(query)
+    .slice(0, 4)
+    .map((place) => ({ place }));
+
 function renderResults() {
   resultsEl.replaceChildren();
-  if (!searchInput.value.trim()) {
+  const query = searchInput.value.trim();
+  if (!query && !results.length) {
     resultsEl.hidden = true;
     return;
   }
-  if (!results.length) {
+  const note = (text) => {
     const li = document.createElement('li');
     li.className = 'empty';
-    li.textContent = 'Sin resultados';
+    li.textContent = text;
     resultsEl.append(li);
-  }
-  results.forEach((feature, i) => {
-    const { name, detail } = describe(feature);
+  };
+  if (!query) note('Tus sitios');
+  else if (!results.length) note('Sin resultados');
+
+  results.forEach((result, i) => {
     const li = document.createElement('li');
     li.setAttribute('role', 'option');
     li.setAttribute('aria-selected', String(i === active));
-    li.innerHTML = '<span class="name"></span><span class="detail"></span>';
-    li.querySelector('.name').textContent = name;
-    li.querySelector('.detail').textContent = detail;
+    li.innerHTML = '<span class="badge"></span><span class="text"><span class="name"></span><span class="detail"></span></span>';
+    if (result.place) {
+      const type = places.typeOf(result.place);
+      const badge = li.querySelector('.badge');
+      badge.innerHTML = placeGlyph(type.id);
+      badge.style.setProperty('--c', type.color);
+      li.querySelector('.name').textContent = result.place.name;
+      li.querySelector('.detail').textContent = type.label;
+    } else {
+      const { name, detail } = describe(result.feature);
+      li.querySelector('.name').textContent = name;
+      li.querySelector('.detail').textContent = detail;
+    }
     li.addEventListener('mousedown', (e) => {
       e.preventDefault(); // keep focus so the blur handler doesn't hide the list first
       choose(i);
@@ -254,22 +283,33 @@ async function search(query) {
     params.set('lon', c.lng.toFixed(4));
   }
 
+  let features = [];
   try {
     const res = await fetch(`${GEOCODER_URL}?${params}`, { signal: pending.signal });
     const data = await res.json();
-    results = data.features ?? [];
+    features = data.features ?? [];
   } catch (err) {
     if (err.name === 'AbortError') return;
     console.error(err);
-    results = [];
   }
+  results = [...placeResults(query), ...features.map((feature) => ({ feature }))];
   active = results.length ? 0 : -1;
   renderResults();
 }
 
 function choose(i) {
-  const feature = results[i];
-  if (!feature) return;
+  const result = results[i];
+  if (!result) return;
+  resultsEl.hidden = true;
+  searchInput.blur();
+
+  if (result.place) {
+    searchInput.value = result.place.name;
+    places.show(result.place);
+    return;
+  }
+
+  const { feature } = result;
   const { name } = describe(feature);
   const [lng, lat] = feature.geometry.coordinates;
   const extent = feature.properties.extent; // [minLon, maxLat, maxLon, minLat]
@@ -286,10 +326,17 @@ function choose(i) {
     map.flyTo({ center: [lng, lat], zoom: ZOOM_BY_TYPE[feature.properties.type] ?? 15, duration: 2500 });
   }
   dropPin([lng, lat], name);
-
   searchInput.value = name;
-  resultsEl.hidden = true;
-  searchInput.blur();
+}
+
+// With an empty box, the list shows your saved places.
+function showSavedPlaces() {
+  results = places
+    .all()
+    .slice(0, 8)
+    .map((place) => ({ place }));
+  active = -1;
+  renderResults();
 }
 
 searchInput.addEventListener('input', () => {
@@ -297,10 +344,13 @@ searchInput.addEventListener('input', () => {
   const query = searchInput.value.trim();
   if (!query) {
     pending?.abort();
-    results = [];
-    renderResults();
+    showSavedPlaces();
     return;
   }
+  // Saved places answer at once; the geocoder catches up.
+  results = placeResults(query);
+  active = results.length ? 0 : -1;
+  renderResults();
   debounce = setTimeout(() => search(query), 250);
 });
 
@@ -317,8 +367,7 @@ searchInput.addEventListener('keydown', (e) => {
   } else if (e.key === 'Escape') {
     if (searchInput.value) {
       searchInput.value = '';
-      results = [];
-      renderResults();
+      showSavedPlaces();
     } else {
       searchInput.blur();
     }
@@ -326,7 +375,8 @@ searchInput.addEventListener('keydown', (e) => {
 });
 
 searchInput.addEventListener('focus', () => {
-  if (searchInput.value.trim() && results.length) renderResults();
+  if (!searchInput.value.trim()) showSavedPlaces();
+  else if (results.length) renderResults();
 });
 searchInput.addEventListener('blur', () => {
   resultsEl.hidden = true;
@@ -339,4 +389,12 @@ document.addEventListener('keydown', (e) => {
     searchInput.focus();
     searchInput.select();
   }
+});
+
+// ---------- Start ----------
+
+// Once the engine's on, go to where you are (unless a shared link says otherwise).
+started.then(async () => {
+  await mapReady;
+  if (!sharedView) geolocate.trigger();
 });

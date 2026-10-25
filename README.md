@@ -1,11 +1,13 @@
 # Mapa
 
-Mapa interactivo con fondo negro, hecho con [MapLibre GL](https://maplibre.org/) y sin claves de API.
+Mapa interactivo en plano con fondo negro, hecho con [MapLibre GL](https://maplibre.org/) y sin claves de API.
 
-- **Mapa negro y vista satélite** (CARTO Dark Matter repintado y Esri World Imagery).
-- **Búsqueda** de lugares con Photon.
+- **Pantalla de inicio**: un único botón de encendido con la animación de arranque de un cuadro de moto.
+- **Mapa negro y vista satélite** (CARTO Dark Matter repintado y Esri World Imagery), siempre orientado al norte.
+- **Búsqueda** de lugares con Photon, que muestra primero tus sitios guardados.
+- **Sitios guardados** como ubicaciones de videojuego: rombos flotantes con su tipo y su nombre (se guardan en el navegador).
 - **Capa de tráfico**: semáforos, pasos de peatones, stops, ceda el paso, señales, radares, reductores y pasos a nivel de OpenStreetMap (vía Overpass), a partir del zoom 15.
-- **Modo conducción estilo Need for Speed**: ruta de OSRM en una vista de radar cenital que gira con el coche, con los semáforos y señales de la ruta como protagonistas (la próxima en grande con cuenta atrás), flecha del siguiente giro, velocímetro con el límite de la vía y un simulador para recorrer la ruta sin moverte.
+- **Modo conducción** con la distribución de un cuadro TFT de moto: testigos, casillas de giro, próxima señal (la protagonista) y velocidad con barra segmentada, el mapa en una ventana que gira con la marcha y un simulador para recorrer la ruta sin moverte. Rutas de OSRM.
 
 Los datos de tráfico vienen de OpenStreetMap: pueden faltar o estar desactualizados. Es una ayuda, no un navegador homologado.
 

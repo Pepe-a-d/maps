@@ -12,31 +12,33 @@ import {
 } from './routing.js';
 import { iconDataUrl } from './traffic.js';
 
-// Driving mode, Need for Speed style: a top-down radar view that turns with the
-// car, the glowing route, the next turn as an arrow, and the lights and signs
-// ahead as the stars of the HUD. A simulator drives the route from a desk.
+// Driving mode laid out like a modern bike TFT dashboard: a status strip with
+// warning lamps, tiles for the next turn, the next sign (the star of the show)
+// and speed with a segmented bar, a row of trip data, and the map in a window
+// that turns with the bike. A simulator drives the route from a desk.
 
-const NEON = '#2ef2ff';
-const PINK = '#ff3df2';
+const ACCENT = '#4c8dff';
 const SIM_SPEEDS = [1, 2, 4];
 const GAUGE_MAX_KMH = 160;
+const REV_SEGMENTS = 24;
 const ARRIVE_M = 15;
 const OFF_ROUTE_M = 30;
 const ITEMS_AHEAD_M = 2000; // how far ahead the map shows lights and signs
-const CAR_Y = 0.63; // the car sits a bit low so you see more of what's coming
+const RADAR_LAMP_M = 300;
+const CAR_Y = 0.7; // where the bike sits in the map window, from the top
 
 const SOURCES = { full: 'nav-full', left: 'nav-left', next: 'nav-next', items: 'nav-items' };
 
-// Accent per kind of item, shared by the map halos and the HUD cards.
+// Colour per kind of item, shared by the map discs and the HUD tiles.
 const CAT_COLOR = {
-  signals: '#ffcc00',
-  stop: '#ff3b45',
-  give_way: '#ff3b45',
-  rail: '#ff3b45',
-  camera: '#ff9800',
-  calming: '#ff9800',
-  crossing: '#2f8cff',
-  sign: '#ffffff',
+  signals: '#ffc93c',
+  stop: '#ff4d4d',
+  give_way: '#ff4d4d',
+  rail: '#ff4d4d',
+  camera: '#ff9a3c',
+  calming: '#ff9a3c',
+  crossing: '#4c8dff',
+  sign: '#f4f4f1',
 };
 
 const PLURAL = {
@@ -55,12 +57,18 @@ const ICONS = {
   play: '<svg viewBox="0 0 24 24"><path d="M7 4.5v15L19.5 12z" fill="currentColor"/></svg>',
   close:
     '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>',
-  car: `<svg viewBox="0 0 48 48" width="52" height="52"><path d="M24 3 41 43 24 33.5 7 43Z" fill="#06181c" stroke="${NEON}" stroke-width="3" stroke-linejoin="round"/><path d="M24 12 33 35 24 29.5 15 35Z" fill="${NEON}" opacity=".35"/></svg>`,
+  car: '<svg viewBox="0 0 48 48" width="44" height="44"><path d="M24 4 40 42 24 33 8 42Z" fill="#f4f4f1"/></svg>',
+  gps: '<svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z" fill="currentColor"/></svg>',
+  radar:
+    '<svg viewBox="0 0 24 24"><path d="M4 8h12l2-3h2v14h-2l-2-3H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Zm5 2.2A1.8 1.8 0 1 0 9 13.8a1.8 1.8 0 0 0 0-3.6Z" fill="currentColor" fill-rule="evenodd"/></svg>',
+  limit:
+    '<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm0 3.2a5.8 5.8 0 1 1 0 11.6 5.8 5.8 0 0 1 0-11.6Z" fill="currentColor" fill-rule="evenodd"/><path d="M11 8.5h2v4.5h-2zM11 14.5h2v2h-2z" fill="currentColor"/></svg>',
 };
 
 const formatDuration = (s) =>
   s < 3600 ? `${Math.max(1, Math.round(s / 60))} min` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
 const clock = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const timeOfDay = (date) => date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
 // "120 m" → ["120", "m"], to draw the number big and the unit small.
 const splitDistance = (m) => formatDistance(m).split(' ');
@@ -94,7 +102,7 @@ export function setupDriving(map, traffic, basemap) {
   let sim = null; // simulator state, or null when following the real GPS
   let abort = null;
 
-  // Car state
+  // Bike state
   let along = 0;
   let speed = 0; // m/s
   let position = null;
@@ -115,6 +123,7 @@ export function setupDriving(map, traffic, basemap) {
   let shownStep = -1; // what the HUD currently shows, to skip rebuilding it
   let shownItems = '';
   let shownMapItems = '';
+  let shownRev = -1;
   let stats = null;
   let wakeLock = null;
 
@@ -137,7 +146,7 @@ export function setupDriving(map, traffic, basemap) {
     root.hidden = true;
     root.innerHTML = `
       <section class="nav-sheet">
-        <p class="nav-kicker">Ruta</p>
+        <p class="nav-label">Ruta</p>
         <h2 class="nav-sheet__dest"></h2>
         <p class="nav-sheet__summary"></p>
         <p class="nav-sheet__extras"></p>
@@ -150,75 +159,73 @@ export function setupDriving(map, traffic, basemap) {
       </section>
 
       <section class="hud">
-        <div class="hud-radar" aria-hidden="true">
-          <svg viewBox="-100 -100 200 200">
-            <circle class="hud-radar__ring" r="97"/>
-            <circle class="hud-radar__ticks" r="91" pathLength="360"/>
-            <g class="hud-radar__north">
-              <path d="M0 -100 L7 -88 L-7 -88Z"/>
-              <text y="-73">N</text>
-            </g>
-          </svg>
-        </div>
+        <div class="hud-window"></div>
 
-        <div class="hud-turn">
-          <div class="hud-turn__icon"></div>
-          <div class="hud-turn__dist"><b></b><small></small></div>
-        </div>
+        <header class="hud-status">
+          <b class="hud-status__clock">--:--</b>
+          <span class="hud-status__dest"></span>
+          <span class="hud-lamps">
+            <i class="lamp lamp--gps" title="GPS">${ICONS.gps}</i>
+            <i class="lamp lamp--radar" title="Radar cerca">${ICONS.radar}</i>
+            <i class="lamp lamp--limit" title="Por encima del límite">${ICONS.limit}</i>
+            <i class="lamp lamp--sim" title="Simulación">SIM</i>
+          </span>
+        </header>
 
-        <div class="hud-hazard">
-          <div class="hud-hazard__main" hidden>
-            <img class="hud-hazard__icon" alt="" width="84" height="84"/>
-            <div class="hud-hazard__body">
-              <div class="hud-hazard__dist"><b></b><small></small></div>
-              <div class="hud-hazard__title"></div>
+        <div class="hud-side">
+          <div class="tile hud-turn">
+            <span class="tile__label">Giro</span>
+            <div class="hud-turn__icon"></div>
+            <div class="hud-turn__dist"><b></b><small></small></div>
+          </div>
+
+          <div class="tile hud-sign">
+            <span class="tile__label">Próxima señal</span>
+            <div class="hud-sign__main" hidden>
+              <img class="hud-sign__icon" alt="" width="88" height="88"/>
+              <div class="hud-sign__body">
+                <div class="hud-sign__dist"><b></b><small></small></div>
+                <div class="hud-sign__title"></div>
+              </div>
             </div>
-            <i class="hud-hazard__bar"><i></i></i>
+            <p class="hud-sign__empty"></p>
+            <i class="hud-sign__bar"><i></i></i>
           </div>
-          <ol class="hud-hazard__more"></ol>
-          <p class="hud-hazard__empty"></p>
-        </div>
 
-        <div class="hud-speed">
-          <div class="hud-limit" hidden><span></span></div>
-          <div class="hud-gauge">
-            <svg viewBox="0 0 120 120" aria-hidden="true">
-              <defs>
-                <linearGradient id="hud-gauge-grad" x1="0" y1="0" x2="1" y2="0">
-                  <stop offset="0" stop-color="${NEON}"/>
-                  <stop offset="0.6" stop-color="${PINK}"/>
-                  <stop offset="1" stop-color="#ff3b45"/>
-                </linearGradient>
-              </defs>
-              <path class="hud-gauge__track" d="M26.1 93.9A48 48 0 1 1 93.9 93.9" pathLength="100"/>
-              <path class="hud-gauge__value" d="M26.1 93.9A48 48 0 1 1 93.9 93.9" pathLength="100" stroke="url(#hud-gauge-grad)"/>
-              <path class="hud-gauge__cuts" d="M26.1 93.9A48 48 0 1 1 93.9 93.9" pathLength="100"/>
-            </svg>
-            <div class="hud-gauge__num">0</div>
-            <div class="hud-gauge__unit">km/h</div>
+          <ol class="hud-more"></ol>
+
+          <div class="tile hud-speed">
+            <div class="hud-rev">${Array.from({ length: REV_SEGMENTS }, (_, i) => `<i style="--t: ${i / (REV_SEGMENTS - 1)}"></i>`).join('')}</div>
+            <div class="hud-speed__row">
+              <b class="hud-speed__num">0</b>
+              <small class="hud-speed__unit">km/h</small>
+              <img class="hud-limit" alt="" width="64" height="64" hidden/>
+            </div>
           </div>
         </div>
 
-        <div class="hud-trip">
-          <div class="hud-trip__stat"><b data-f="eta">--:--</b><small>llegada</small></div>
-          <div class="hud-trip__stat"><b data-f="time">-</b><small>restante</small></div>
-          <div class="hud-trip__stat"><b data-f="dist">-</b><small>distancia</small></div>
-          <div class="hud-trip__controls">
+        <footer class="hud-bar">
+          <div class="tile hud-stat"><span class="tile__label">Llegada</span><b data-f="eta">--:--</b></div>
+          <div class="tile hud-stat"><span class="tile__label">Restante</span><b data-f="time">-</b></div>
+          <div class="tile hud-stat"><span class="tile__label">Distancia</span><b data-f="dist">-</b></div>
+          <div class="hud-controls">
             <button class="hud-btn sim-only" data-act="pause" aria-label="Pausa"></button>
             <button class="hud-btn sim-only hud-btn--text" data-act="simspeed" aria-label="Velocidad de simulación"></button>
             <button class="hud-btn hud-btn--exit" data-act="exit" aria-label="Salir">${ICONS.close}</button>
           </div>
-        </div>
+        </footer>
 
         <button class="nav-btn hud-recenter" data-act="recenter" hidden>Recentrar</button>
         <div class="hud-toast" hidden></div>
       </section>
 
       <section class="nav-finish">
-        <p class="nav-kicker">Ruta completada</p>
-        <h2 class="nav-finish__title">Destino alcanzado</h2>
-        <dl class="nav-finish__stats"></dl>
-        <button class="nav-btn nav-btn--go" data-act="exit">Volver al mapa</button>
+        <div class="nav-finish__card">
+          <p class="nav-label">Ruta completada</p>
+          <h2 class="nav-finish__title">Destino alcanzado</h2>
+          <dl class="nav-finish__stats"></dl>
+          <button class="nav-btn nav-btn--go" data-act="exit">Volver al mapa</button>
+        </div>
       </section>`;
 
     root.addEventListener('click', (e) => {
@@ -236,25 +243,29 @@ export function setupDriving(map, traffic, basemap) {
       note: $('.nav-sheet__note'),
       go: $('[data-act="go"]'),
       simBtn: $('[data-act="sim"]'),
-      north: $('.hud-radar__north'),
-      northLabel: $('.hud-radar__north text'),
+      window: $('.hud-window'),
+      clock: $('.hud-status__clock'),
+      statusDest: $('.hud-status__dest'),
+      lampGps: $('.lamp--gps'),
+      lampRadar: $('.lamp--radar'),
+      lampLimit: $('.lamp--limit'),
       turn: $('.hud-turn'),
       turnIcon: $('.hud-turn__icon'),
       turnNum: $('.hud-turn__dist b'),
       turnUnit: $('.hud-turn__dist small'),
-      hazard: $('.hud-hazard__main'),
-      hazardIcon: $('.hud-hazard__icon'),
-      hazardNum: $('.hud-hazard__dist b'),
-      hazardUnit: $('.hud-hazard__dist small'),
-      hazardTitle: $('.hud-hazard__title'),
-      hazardBar: $('.hud-hazard__bar i'),
-      more: $('.hud-hazard__more'),
-      empty: $('.hud-hazard__empty'),
+      sign: $('.hud-sign'),
+      signMain: $('.hud-sign__main'),
+      signIcon: $('.hud-sign__icon'),
+      signNum: $('.hud-sign__dist b'),
+      signUnit: $('.hud-sign__dist small'),
+      signTitle: $('.hud-sign__title'),
+      signBar: $('.hud-sign__bar i'),
+      signEmpty: $('.hud-sign__empty'),
+      more: $('.hud-more'),
+      speedTile: $('.hud-speed'),
+      rev: [...root.querySelectorAll('.hud-rev i')],
+      speedNum: $('.hud-speed__num'),
       limit: $('.hud-limit'),
-      limitNum: $('.hud-limit span'),
-      gauge: $('.hud-gauge'),
-      gaugeValue: $('.hud-gauge__value'),
-      gaugeNum: $('.hud-gauge__num'),
       eta: $('[data-f="eta"]'),
       time: $('[data-f="time"]'),
       dist: $('[data-f="dist"]'),
@@ -291,7 +302,7 @@ export function setupDriving(map, traffic, basemap) {
     document.body.classList.toggle('nav-on', next !== 'off');
     document.body.classList.toggle('driving', driving);
     if (driving !== wasDriving) {
-      // Behind the wheel: black map only, and just the lights/signs on the route.
+      // On the road: black map only, and just the lights/signs on the route.
       basemap.force(driving ? 'map' : null);
       traffic.setVisible(!driving);
     }
@@ -352,12 +363,12 @@ export function setupDriving(map, traffic, basemap) {
     chevron.width = chevron.height = 32;
     const ctx = chevron.getContext('2d');
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 5;
+    ctx.lineWidth = 4;
     ctx.lineCap = ctx.lineJoin = 'round';
     ctx.beginPath();
-    ctx.moveTo(10, 6);
-    ctx.lineTo(22, 16);
-    ctx.lineTo(10, 26);
+    ctx.moveTo(11, 7);
+    ctx.lineTo(21, 16);
+    ctx.lineTo(11, 25);
     ctx.stroke();
     map.addImage('nav-chevron', ctx.getImageData(0, 0, 32, 32), { pixelRatio: 2 });
 
@@ -366,58 +377,37 @@ export function setupDriving(map, traffic, basemap) {
     const round = { 'line-join': 'round', 'line-cap': 'round' };
     const catColor = ['match', ['get', 'cat'], ...Object.entries(CAT_COLOR).flat(), '#ffffff'];
     const routeLayers = [
-      { id: 'nav-done', source: SOURCES.full, type: 'line', layout: round, paint: { 'line-color': NEON, 'line-opacity': 0.2, 'line-width': width(3, 9) } },
-      { id: 'nav-glow', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': NEON, 'line-opacity': 0.35, 'line-blur': 6, 'line-width': width(10, 34) } },
-      { id: 'nav-line', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': NEON, 'line-width': width(5, 14) } },
-      { id: 'nav-core', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': '#e6fdff', 'line-width': width(1.5, 4) } },
+      { id: 'nav-done', source: SOURCES.full, type: 'line', layout: round, paint: { 'line-color': '#3a3e46', 'line-width': width(3, 10) } },
+      { id: 'nav-line', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': ACCENT, 'line-width': width(5, 16) } },
       {
         id: 'nav-arrows',
         source: SOURCES.left,
         type: 'symbol',
         layout: {
           'symbol-placement': 'line',
-          'symbol-spacing': 70,
+          'symbol-spacing': 80,
           'icon-image': 'nav-chevron',
           'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.45, 18, 0.9],
           'icon-allow-overlap': true,
           'icon-ignore-placement': true,
           'icon-rotation-alignment': 'map',
         },
-        paint: { 'icon-opacity': 0.85 },
+        paint: { 'icon-opacity': 0.75 },
       },
-      { id: 'nav-next-glow', source: SOURCES.next, type: 'circle', paint: { 'circle-radius': 18, 'circle-color': PINK, 'circle-opacity': 0.25, 'circle-blur': 0.8 } },
-      {
-        id: 'nav-next',
-        source: SOURCES.next,
-        type: 'circle',
-        paint: { 'circle-radius': 9, 'circle-color': '#000', 'circle-stroke-color': PINK, 'circle-stroke-width': 3 },
-      },
+      { id: 'nav-next', source: SOURCES.next, type: 'circle', paint: { 'circle-radius': 8, 'circle-color': '#f4f4f1' } },
     ];
     for (const layer of routeLayers) map.addLayer(layer, before);
 
-    // Lights and signs on the route go on top of everything, big and haloed.
+    // Lights and signs on the route go on top of everything, big, on a flat disc.
     const itemLayers = [
       {
-        id: 'nav-items-halo',
+        id: 'nav-items-disc',
         source: SOURCES.items,
         type: 'circle',
         paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 12, 18, 34],
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 13, 18, 34],
           'circle-color': catColor,
-          'circle-opacity': 0.3,
-          'circle-blur': 0.7,
-        },
-      },
-      {
-        id: 'nav-items-next',
-        source: SOURCES.items,
-        type: 'circle',
-        filter: ['==', ['get', 'next'], true],
-        paint: {
-          'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 15, 18, 40],
-          'circle-color': 'rgba(0,0,0,0)',
-          'circle-stroke-color': catColor,
-          'circle-stroke-width': 3,
+          'circle-opacity': ['case', ['==', ['get', 'next'], true], 0.5, 0.2],
         },
       },
       {
@@ -459,7 +449,6 @@ export function setupDriving(map, traffic, basemap) {
     map.fitBounds(bounds, {
       padding: { top: 80, left: 40, right: 80, bottom: sheetHeight + 40 },
       maxZoom: 17,
-      pitch: 0,
       bearing: 0,
       duration: 1200,
     });
@@ -548,15 +537,20 @@ export function setupDriving(map, traffic, basemap) {
     speed = 0;
     position = route.line.coords[0];
     heading = camBearing = route.line.bearingAt(0);
-    camZoom = 17.6;
+    camZoom = 17.4;
     follow = true;
+    shownRev = -1;
     setMode('driving');
+    ui.statusDest.textContent = dest?.name ?? '';
     buildSimStops();
     renderButtons();
-    applyLayout();
     ui.recenter.hidden = true;
     carMarker.setLngLat(position).setRotation(heading).addTo(map);
-    map.jumpTo({ center: position, bearing: camBearing, pitch: 0, zoom: camZoom });
+    // The HUD has to be on screen before its map window can be measured.
+    requestAnimationFrame(() => {
+      applyLayout();
+      map.jumpTo({ center: position, bearing: camBearing, zoom: camZoom });
+    });
 
     if (!simulated) startGps();
     requestWakeLock();
@@ -706,24 +700,20 @@ export function setupDriving(map, traffic, basemap) {
     heading = (heading + 360) % 360;
     carMarker.setLngLat(position).setRotation(heading);
 
-    // Radar camera: straight down, turning with the car, zooming out with speed.
+    // Top-down camera that turns with the bike and zooms out with speed.
     const kmh = speed * 3.6;
-    const zoomTarget = 17.6 - Math.min(1, Math.max(0, (kmh - 30) / 70)) * 1.5;
+    const zoomTarget = 17.4 - Math.min(1, Math.max(0, (kmh - 30) / 70)) * 1.5;
     camZoom += (zoomTarget - camZoom) * Math.min(1, dt * 1.5);
     camBearing = (camBearing + angleDiff(camBearing, heading) * Math.min(1, dt * 2.5) + 360) % 360;
     if (!follow && resumeFollowAt && now > resumeFollowAt) {
       follow = true;
       resumeFollowAt = 0;
-      ui.root.classList.remove('is-free');
     }
-    if (follow) map.jumpTo({ center: position, bearing: camBearing, pitch: 0, zoom: camZoom });
-    // Keep the radar's N pointing north, with the letter upright.
-    ui.north.setAttribute('transform', `rotate(${-camBearing})`);
-    ui.northLabel.setAttribute('transform', `rotate(${camBearing} 0 -79)`);
+    if (follow) map.jumpTo({ center: position, bearing: camBearing, zoom: camZoom });
 
     if (now - lastHud > 150) {
       lastHud = now;
-      updateHud(kmh);
+      updateHud(kmh, now);
     }
 
     const end = route.line.length;
@@ -740,8 +730,10 @@ export function setupDriving(map, traffic, basemap) {
     unitEl.textContent = unit;
   }
 
-  function updateHud(kmh) {
+  function updateHud(kmh, now) {
     const { line, steps } = route;
+
+    ui.clock.textContent = timeOfDay(new Date());
 
     // Next turn: just the arrow and how far.
     let k = steps.findIndex((s, i) => i > 0 && s.along > along + 2);
@@ -751,9 +743,6 @@ export function setupDriving(map, traffic, basemap) {
     if (k !== shownStep) {
       shownStep = k;
       ui.turnIcon.innerHTML = maneuverIcon(step);
-      ui.turn.classList.remove('is-new');
-      void ui.turn.offsetWidth; // restart the flash animation
-      ui.turn.classList.add('is-new');
       const p = line.pointAt(step.along);
       map.getSource(SOURCES.next).setData({ type: 'Feature', geometry: { type: 'Point', coordinates: p }, properties: {} });
     }
@@ -768,39 +757,38 @@ export function setupDriving(map, traffic, basemap) {
       .slice(0, 3)
       .map((item) => item.id)
       .join(',');
-    ui.hazard.hidden = !next;
+    ui.signMain.hidden = !next;
     if (key !== shownItems) {
       shownItems = key;
       if (next) {
-        ui.hazard.dataset.cat = next.cat;
-        ui.hazard.style.setProperty('--c', CAT_COLOR[next.cat]);
-        ui.hazardIcon.src = iconDataUrl(next.icon);
-        ui.hazardTitle.textContent = next.title;
-        ui.hazard.classList.remove('is-new');
-        void ui.hazard.offsetWidth;
-        ui.hazard.classList.add('is-new');
+        ui.sign.style.setProperty('--c', CAT_COLOR[next.cat]);
+        ui.signIcon.src = iconDataUrl(next.icon);
+        ui.signTitle.textContent = next.title;
       }
       ui.more.replaceChildren(
         ...more.map((item) => {
           const li = document.createElement('li');
+          li.className = 'tile';
           li.style.setProperty('--c', CAT_COLOR[item.cat]);
-          li.innerHTML = '<img alt="" width="40" height="40"/><b></b>';
+          li.innerHTML = '<img alt="" width="36" height="36"/><b></b>';
           li.querySelector('img').src = iconDataUrl(item.icon);
           li.title = item.title;
           return li;
         }),
       );
     }
+    const toSign = next ? Math.max(0, next.along - along) : Infinity;
     if (next) {
-      const d = Math.max(0, next.along - along);
-      setDistance(ui.hazardNum, ui.hazardUnit, d);
-      ui.hazardBar.style.width = `${(1 - Math.min(d, 300) / 300) * 100}%`;
-      ui.hazard.classList.toggle('is-close', d < 60);
+      setDistance(ui.signNum, ui.signUnit, toSign);
+      ui.signBar.style.width = `${(1 - Math.min(toSign, 300) / 300) * 100}%`;
+    } else {
+      ui.signBar.style.width = '0';
     }
+    ui.sign.classList.toggle('is-close', toSign < 60);
     more.forEach((item, i) => {
       ui.more.children[i].querySelector('b').textContent = formatDistance(Math.max(0, item.along - along));
     });
-    ui.empty.textContent = next
+    ui.signEmpty.textContent = next
       ? ''
       : route.detailsState === 'loading'
         ? 'Buscando semáforos y señales…'
@@ -823,21 +811,40 @@ export function setupDriving(map, traffic, basemap) {
       });
     }
 
-    // Speed
+    // Speed: big number, segmented bar, and the limit sign of this stretch.
     const seg = line.segmentAt(along);
     const limit = route.limits?.[seg];
+    const over = Boolean(limit && kmh > limit + 3);
+    ui.speedNum.textContent = Math.round(kmh);
+    ui.speedTile.classList.toggle('is-over', over);
+    const lit = Math.round(Math.min(1, kmh / GAUGE_MAX_KMH) * REV_SEGMENTS);
+    const limitAt = limit ? Math.round((limit / GAUGE_MAX_KMH) * REV_SEGMENTS) : REV_SEGMENTS;
+    const revKey = lit * 100 + limitAt;
+    if (revKey !== shownRev) {
+      shownRev = revKey;
+      ui.rev.forEach((segEl, i) => {
+        segEl.classList.toggle('on', i < lit);
+        segEl.classList.toggle('past-limit', i >= limitAt);
+      });
+    }
     ui.limit.hidden = !limit;
-    if (limit) ui.limitNum.textContent = limit;
-    const over = limit && kmh > limit + 3;
-    ui.gauge.classList.toggle('is-over', Boolean(over));
-    ui.limit.classList.toggle('is-over', Boolean(over));
-    ui.gaugeNum.textContent = Math.round(kmh);
-    ui.gaugeValue.style.strokeDasharray = `${Math.min(1, kmh / GAUGE_MAX_KMH) * 100} 100`;
+    if (limit) {
+      const src = iconDataUrl(`tr-speed-${limit}`);
+      if (ui.limit.getAttribute('src') !== src) ui.limit.src = src;
+    }
+
+    // Warning lamps
+    const fresh = gps?.time && now - gps.time < 5000;
+    ui.lampGps.classList.toggle('on', Boolean(fresh));
+    ui.lampRadar.classList.toggle(
+      'on',
+      upcoming.some((item) => item.cat === 'camera' && item.along - along < RADAR_LAMP_M),
+    );
+    ui.lampLimit.classList.toggle('on', over);
 
     // Trip
     const left = remainingSeconds(route, along);
-    const eta = new Date(Date.now() + left * 1000);
-    ui.eta.textContent = eta.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    ui.eta.textContent = timeOfDay(new Date(Date.now() + left * 1000));
     ui.time.textContent = formatDuration(left);
     ui.dist.textContent = formatDistance(line.length - along);
 
@@ -847,14 +854,19 @@ export function setupDriving(map, traffic, basemap) {
 
   // ---------- Camera follow ----------
 
-  // Put the car low on screen and center the radar ring on it.
+  // Fit the camera to the map window: bike centred across it, low down in it.
   function applyLayout() {
-    const { clientWidth: w, clientHeight: h } = map.getContainer();
-    const top = Math.round(h * (2 * CAR_Y - 1));
-    map.setPadding({ top, bottom: 0, left: 0, right: 0 });
-    ui.root.style.setProperty('--cx', `${w / 2}px`);
-    ui.root.style.setProperty('--cy', `${top + (h - top) / 2}px`);
-    ui.root.style.setProperty('--r', `${Math.round(Math.max(110, Math.min(260, Math.min(w, h) * 0.3)))}px`);
+    const box = ui.window.getBoundingClientRect();
+    const h = map.getContainer().clientHeight;
+    const w = map.getContainer().clientWidth;
+    const carY = box.top + box.height * CAR_Y;
+    const bottom = Math.max(0, h - box.bottom);
+    map.setPadding({
+      left: Math.max(0, box.left),
+      right: Math.max(0, w - box.right),
+      bottom,
+      top: Math.max(0, 2 * carY - (h - bottom)),
+    });
   }
 
   function setFollow(on) {
@@ -862,21 +874,20 @@ export function setupDriving(map, traffic, basemap) {
     if (!on) {
       follow = false;
       resumeFollowAt = 0;
-      ui.root.classList.add('is-free');
       return;
     }
-    // Glide back over the car, then lock on again.
-    map.easeTo({ center: position, bearing: camBearing, pitch: 0, zoom: camZoom, duration: 700 });
+    // Glide back over the bike, then lock on again.
+    map.easeTo({ center: position, bearing: camBearing, zoom: camZoom, duration: 700 });
     resumeFollowAt = performance.now() + 700;
   }
 
-  for (const type of ['dragstart', 'rotatestart', 'pitchstart', 'zoomstart']) {
+  for (const type of ['dragstart', 'zoomstart']) {
     map.on(type, (e) => {
       if (mode === 'driving' && e.originalEvent) setFollow(false);
     });
   }
   window.addEventListener('resize', () => {
-    if (mode === 'driving') applyLayout();
+    if (mode === 'driving') requestAnimationFrame(applyLayout);
   });
 
   // ---------- Wake lock ----------
@@ -904,20 +915,23 @@ export function setupDriving(map, traffic, basemap) {
     const rows = [
       ['Tiempo', clock(stats.time)],
       ['Distancia', formatDistance(stats.dist)],
-      ['Velocidad media', `${Math.round(avg)} km/h`],
-      ['Velocidad máxima', `${Math.round(stats.maxSpeed * 3.6)} km/h`],
+      ['Vel. media', `${Math.round(avg)} km/h`],
+      ['Vel. máxima', `${Math.round(stats.maxSpeed * 3.6)} km/h`],
       ['Semáforos', count('signals')],
       ['Pasos de peatones', count('crossing')],
-      ['Stops y ceda el paso', count('stop') + count('give_way')],
+      ['Stops y ceda', count('stop') + count('give_way')],
       ['Radares', count('camera')],
     ];
     ui.finishStats.replaceChildren(
-      ...rows.flatMap(([label, value]) => {
+      ...rows.map(([label, value]) => {
+        const tile = document.createElement('div');
+        tile.className = 'tile';
         const dt = document.createElement('dt');
         dt.textContent = label;
         const dd = document.createElement('dd');
         dd.textContent = value;
-        return [dt, dd];
+        tile.append(dt, dd);
+        return tile;
       }),
     );
   }
@@ -945,7 +959,6 @@ export function setupDriving(map, traffic, basemap) {
     shownItems = '';
     shownMapItems = '';
     ui.toast.hidden = true;
-    ui.root.classList.remove('is-free');
     setMode('off');
     traffic.setPaused(false);
     map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
