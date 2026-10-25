@@ -2,7 +2,7 @@ import * as maplibregl from 'maplibre-gl';
 
 // Saved places, drawn like locations on a video game map: a floating diamond
 // with the place's glyph, its name underneath, and a "new location" banner
-// when you save one. Stored in this browser only.
+// when you save one. Tapping one plans the route there. Stored in this browser only.
 
 const STORAGE_KEY = 'maps-places';
 const LABEL_MIN_ZOOM = 12;
@@ -71,7 +71,7 @@ function load() {
 export function setupPlaces(map, { onGo }) {
   let places = load();
   const markers = new Map(); // id -> Marker
-  const popup = new maplibregl.Popup({ offset: 26, maxWidth: '280px' });
+  const listeners = new Set();
 
   function persist() {
     try {
@@ -79,6 +79,7 @@ export function setupPlaces(map, { onGo }) {
     } catch {
       showBanner('No se pudo guardar', 'El navegador no deja guardar datos');
     }
+    listeners.forEach((fn) => fn());
   }
 
   // ---------- Markers ----------
@@ -94,7 +95,7 @@ export function setupPlaces(map, { onGo }) {
     el.querySelector('.place__label').textContent = place.name;
     el.addEventListener('click', (e) => {
       e.stopPropagation(); // don't drop a pin underneath
-      openPopup(place);
+      onGo(place);
     });
     return el;
   }
@@ -112,47 +113,6 @@ export function setupPlaces(map, { onGo }) {
   places.forEach((place) => addMarker(place));
   map.on('zoom', updateLabels);
   updateLabels();
-
-  // ---------- Popup ----------
-
-  function openPopup(place) {
-    const type = typeOf(place.type);
-    const box = document.createElement('div');
-    box.className = 'pin-popup';
-    box.innerHTML = `
-      <span class="pin-popup__kind"></span>
-      <strong></strong>
-      <div class="pin-popup__actions">
-        <button class="pin-popup__go" data-act="go">Ir aquí</button>
-        <button data-act="edit">Editar</button>
-        <button data-act="delete">Borrar</button>
-      </div>`;
-    box.querySelector('.pin-popup__kind').textContent = type.label;
-    box.querySelector('strong').textContent = place.name;
-    box.addEventListener('click', (e) => {
-      const button = e.target.closest('[data-act]');
-      if (!button) return;
-      const act = button.dataset.act;
-      if (act === 'go') {
-        popup.remove();
-        onGo(place);
-      } else if (act === 'edit') {
-        popup.remove();
-        openDialog({ place });
-      } else if (act === 'delete') {
-        // Second tap confirms.
-        if (button.dataset.armed) {
-          popup.remove();
-          remove(place.id);
-        } else {
-          button.dataset.armed = 'yes';
-          button.textContent = '¿Seguro?';
-          button.classList.add('is-danger');
-        }
-      }
-    });
-    popup.setLngLat([place.lng, place.lat]).setDOMContent(box).addTo(map);
-  }
 
   function remove(id) {
     places = places.filter((p) => p.id !== id);
@@ -265,9 +225,12 @@ export function setupPlaces(map, { onGo }) {
     save(lngLat, name) {
       openDialog({ lngLat, name });
     },
-    show(place) {
-      map.flyTo({ center: [place.lng, place.lat], zoom: Math.max(map.getZoom(), 16), duration: 1800 });
-      openPopup(place);
+    edit(place) {
+      openDialog({ place });
+    },
+    remove,
+    onChange(fn) {
+      listeners.add(fn);
     },
   };
 }

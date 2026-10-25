@@ -3,11 +3,11 @@
 Mapa interactivo en plano con fondo negro, hecho con [MapLibre GL](https://maplibre.org/) y sin claves de API.
 
 - **Pantalla de inicio**: un único botón de encendido con la animación de arranque de un cuadro de moto.
-- **Mapa negro y vista satélite** (CARTO Dark Matter repintado y Esri World Imagery), siempre orientado al norte.
-- **Búsqueda** de lugares con Photon, que muestra primero tus sitios guardados.
-- **Sitios guardados** como ubicaciones de videojuego: rombos flotantes con su tipo y su nombre (se guardan en el navegador).
-- **Capa de tráfico**: semáforos, pasos de peatones, stops, ceda el paso, señales, radares, reductores y pasos a nivel de OpenStreetMap (vía Overpass), a partir del zoom 15.
-- **Modo conducción** con la distribución de un cuadro TFT de moto: testigos, casillas de giro, próxima señal (la protagonista) y velocidad con barra segmentada, el mapa en una ventana que gira con la marcha y un simulador para recorrer la ruta sin moverte. Rutas de OSRM.
+- **Mapa limpio**: solo el buscador, los ajustes y tu ubicación. Plano y orientado al norte; negro o satélite.
+- **Sitios guardados** como ubicaciones de videojuego: tocarlos marca la ruta al momento. Se gestionan en Ajustes y se guardan en el navegador.
+- **Rutas** con preferencia: más rápida (OSRM), sin semáforos (compara alternativas y cuenta semáforos con Overpass), alta velocidad o baja velocidad (Valhalla).
+- **Modo conducción** con la distribución de un cuadro TFT de moto: giro, próxima señal (la protagonista) y velocidad con el límite. Las señales siguientes, los datos del viaje y la hora con los testigos se activan en Ajustes. Funciona en vertical y en horizontal, y tiene un simulador.
+- **Semáforos y señales en el mapa** (OpenStreetMap vía Overpass), ocultos salvo que los actives en Ajustes.
 
 Los datos de tráfico vienen de OpenStreetMap: pueden faltar o estar desactualizados. Es una ayuda, no un navegador homologado.
 

@@ -3,8 +3,9 @@ import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import './style.css';
 import { setupTraffic, TRAFFIC_LAYER } from './traffic.js';
-import { addSatellite, setupBasemapSwitch } from './basemap.js';
+import { addSatellite, setupBasemap } from './basemap.js';
 import { setupDriving } from './drive.js';
+import { setupSettingsPanel } from './panel.js';
 import { placeGlyph, setupPlaces } from './places.js';
 import { showSplash } from './splash.js';
 
@@ -34,11 +35,8 @@ const ZOOM_BY_TYPE = {
 };
 
 const mapEl = document.getElementById('map');
-const coordsEl = document.getElementById('coords');
 const searchInput = document.getElementById('search-input');
 const resultsEl = document.getElementById('search-results');
-
-const fmt = (n) => n.toFixed(5);
 
 // ---------- Style ----------
 
@@ -100,40 +98,39 @@ try {
 
 const mapReady = new Promise((resolve) => map.once('load', resolve));
 
-map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+// The only control on the map: go to where you are. Zoom is by pinch or wheel.
 const geolocate = new maplibregl.GeolocateControl({
   positionOptions: { enableHighAccuracy: true },
   trackUserLocation: true,
 });
-map.addControl(geolocate, 'top-right');
-map.addControl(new maplibregl.FullscreenControl(), 'top-right');
-map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
+map.addControl(geolocate, 'bottom-right');
+
+// The credits stay one tap away instead of open on the map.
+mapReady.then(() => map.getContainer().querySelector('.maplibregl-ctrl-attrib')?.classList.remove('maplibregl-compact-show'));
 
 const traffic = setupTraffic(map);
-const basemap = setupBasemapSwitch(map);
+const basemap = setupBasemap(map);
 const drive = setupDriving(map, traffic, basemap);
-const places = setupPlaces(map, { onGo: (place) => drive.planTo([place.lng, place.lat], place.name) });
-
-// ---------- Coordinates under the cursor ----------
-
-map.on('mousemove', (e) => {
-  coordsEl.textContent = `${fmt(e.lngLat.lat)}, ${fmt(e.lngLat.lng)}  ·  z${map.getZoom().toFixed(1)}`;
-});
-map.on('mouseout', () => {
-  coordsEl.textContent = '';
-});
+const goTo = (place) => {
+  pin.remove(); // a pin left from before would only get in the way
+  drive.planTo([place.lng, place.lat], place.name);
+};
+const places = setupPlaces(map, { onGo: goTo });
+const settingsPanel = setupSettingsPanel({ traffic, places, onGo: goTo });
+document.getElementById('settings-button').addEventListener('click', () => settingsPanel.open());
 
 // ---------- Pin ----------
 
 const pinEl = document.createElement('div');
 pinEl.className = 'pin';
 const pin = new maplibregl.Marker({ element: pinEl });
-const popup = new maplibregl.Popup({ offset: 16, maxWidth: '280px' });
+// Clicks elsewhere move the pin, so the popup doesn't close itself on them.
+const popup = new maplibregl.Popup({ offset: 16, maxWidth: '280px', closeOnClick: false });
 pin.setPopup(popup);
+popup.on('close', () => pin.remove());
 
 function dropPin(lngLat, title) {
   const { lng, lat } = maplibregl.LngLat.convert(lngLat);
-  const text = `${fmt(lat)}, ${fmt(lng)}`;
 
   const box = document.createElement('div');
   box.className = 'pin-popup';
@@ -142,25 +139,9 @@ function dropPin(lngLat, title) {
     name.textContent = title;
     box.append(name);
   }
-  const coords = document.createElement('span');
-  coords.className = 'pin-popup__coords';
-  coords.textContent = text;
 
   const actions = document.createElement('div');
   actions.className = 'pin-popup__actions';
-  const copyBtn = document.createElement('button');
-  copyBtn.textContent = 'Copiar';
-  copyBtn.onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      copyBtn.textContent = 'Copiado';
-    } catch {
-      copyBtn.textContent = 'No se pudo copiar';
-    }
-  };
-  const removeBtn = document.createElement('button');
-  removeBtn.textContent = 'Quitar';
-  removeBtn.onclick = () => pin.remove();
   const goBtn = document.createElement('button');
   goBtn.className = 'pin-popup__go';
   goBtn.textContent = 'Ir aquí';
@@ -174,9 +155,9 @@ function dropPin(lngLat, title) {
     pin.remove();
     places.save([lng, lat], title);
   };
-  actions.append(goBtn, saveBtn, copyBtn, removeBtn);
+  actions.append(goBtn, saveBtn);
 
-  box.append(coords, actions);
+  box.append(actions);
   popup.setDOMContent(box);
   pin.setLngLat([lng, lat]).addTo(map);
   if (!popup.isOpen()) pin.togglePopup();
@@ -188,26 +169,6 @@ map.on('click', (e) => {
   if (map.getLayer(TRAFFIC_LAYER) && map.queryRenderedFeatures(e.point, { layers: [TRAFFIC_LAYER] }).length) return;
   dropPin(e.lngLat);
 });
-
-// ---------- Drive button ----------
-
-const driveBtn = document.createElement('button');
-driveBtn.type = 'button';
-driveBtn.className = 'drive-btn';
-driveBtn.innerHTML =
-  '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 20 21 12 16.5 4 21Z" fill="currentColor"/></svg><span>Conducir</span>';
-driveBtn.addEventListener('click', () => {
-  // With a pin on the map, go there; otherwise ask where to.
-  const target = pin.getElement().isConnected ? pin.getLngLat() : null;
-  if (target) {
-    pin.remove();
-    drive.planTo([target.lng, target.lat], popup.getElement()?.querySelector('strong')?.textContent || 'Punto en el mapa');
-  } else {
-    searchInput.placeholder = '¿A dónde vamos? Busca o toca el mapa';
-    searchInput.focus();
-  }
-});
-document.body.append(driveBtn);
 
 // ---------- Search: your saved places first, then Photon ----------
 
@@ -303,9 +264,10 @@ function choose(i) {
   resultsEl.hidden = true;
   searchInput.blur();
 
+  // A saved place: straight to the route.
   if (result.place) {
-    searchInput.value = result.place.name;
-    places.show(result.place);
+    searchInput.value = '';
+    goTo(result.place);
     return;
   }
 

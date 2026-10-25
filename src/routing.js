@@ -87,9 +87,28 @@ export function turnSpeed({ type, modifier }) {
 
 // ---------- Route ----------
 
-export async function fetchRoute(from, to, signal) {
+export const ROUTE_MODES = [
+  { id: 'fastest', label: 'Más rápida' },
+  { id: 'no-lights', label: 'Sin semáforos' },
+  { id: 'fast', label: 'Alta velocidad' },
+  { id: 'slow', label: 'Baja velocidad' },
+];
+
+// Valhalla (FOSSGIS, free, no key) can be told how to drive: these two shape
+// the "high speed" and "low speed" routes.
+const VALHALLA = 'https://valhalla1.openstreetmap.de/route';
+const FAST_COSTING = { use_highways: 1 };
+const SLOW_COSTING = { use_highways: 0, top_speed: 60 };
+
+// How much slower than the quickest option a preference may make the trip.
+const MAX_DETOUR = 1.4;
+const MAX_DETOUR_FOR_LIGHTS = 1.6;
+
+async function osrmRoutes(from, to, signal, alternatives = false) {
   const coords = [from, to].map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`).join(';');
-  const path = `/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true&annotations=duration,speed`;
+  const path =
+    `/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=true&annotations=duration,speed` +
+    (alternatives ? '&alternatives=3' : '');
   let lastError;
   for (const base of OSRM) {
     try {
@@ -99,7 +118,7 @@ export async function fetchRoute(from, to, signal) {
         throw new NoRouteError('No hay ruta en coche hasta ese punto.');
       }
       if (!res.ok || data.code !== 'Ok') throw new Error(data.message || `OSRM ${res.status}`);
-      return buildRoute(data.routes[0]);
+      return data.routes.map(buildRoute);
     } catch (err) {
       if (err.name === 'AbortError' || err instanceof NoRouteError) throw err;
       console.warn('OSRM:', err.message);
@@ -107,6 +126,123 @@ export async function fetchRoute(from, to, signal) {
     }
   }
   throw lastError;
+}
+
+async function valhallaRoutes(from, to, costing, signal) {
+  const res = await fetch(VALHALLA, {
+    method: 'POST',
+    signal,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      locations: [from, to].map(([lon, lat]) => ({ lat, lon })),
+      costing: 'auto',
+      costing_options: { auto: costing },
+      format: 'osrm',
+      shape_format: 'geojson',
+      alternates: 2,
+      banner_instructions: false,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok || data.code !== 'Ok') throw new Error(data.error || `Valhalla ${res.status}`);
+  return data.routes.map(fromValhalla);
+}
+
+// Valhalla answers in OSRM's format but without per-segment timings: rebuild
+// them by spreading each step's time over its length.
+function fromValhalla(route) {
+  const coords = [];
+  const duration = [];
+  for (const step of route.legs[0].steps) {
+    const g = step.geometry.coordinates;
+    const lengths = g.slice(1).map((p, k) => distance(g[k], p));
+    const stepLength = lengths.reduce((a, b) => a + b, 0);
+    lengths.forEach((d) => duration.push(stepLength ? (step.duration * d) / stepLength : 0));
+    // Steps share their joining point.
+    if (coords.length) duration.splice(duration.length - lengths.length, 0, 0);
+    coords.push(...g);
+  }
+  const line = new Line(coords);
+  const speed = duration.map((t, i) => (t ? (line.cum[i + 1] - line.cum[i]) / t : 0));
+  return buildRoute({ ...route, geometry: { coordinates: coords }, legs: [{ ...route.legs[0], annotation: { duration, speed } }] });
+}
+
+const avgSpeed = (route) => route.line.length / route.duration;
+
+// Among the options not much slower than the quickest, the one scoring lowest.
+function pick(routes, score) {
+  const quickest = Math.min(...routes.map((r) => r.duration));
+  return routes.filter((r) => r.duration <= quickest * MAX_DETOUR).sort((a, b) => score(a) - score(b))[0];
+}
+
+// Two engines often find the same road: keep one of each.
+function distinct(routes) {
+  const kept = [];
+  for (const route of routes) {
+    const mid = route.line.pointAt(route.line.length / 2);
+    const same = kept.some(
+      (k) => Math.abs(k.line.length - route.line.length) < route.line.length * 0.02 && distance(k.line.pointAt(k.line.length / 2), mid) < 60,
+    );
+    if (!same) kept.push(route);
+  }
+  return kept;
+}
+
+// The route for a preference. For "no lights" it also returns the candidates,
+// which need counting before the best one is known.
+export async function findRoute(from, to, mode, signal) {
+  if (mode === 'fast' || mode === 'slow') {
+    let routes;
+    try {
+      routes = await valhallaRoutes(from, to, mode === 'fast' ? FAST_COSTING : SLOW_COSTING, signal);
+    } catch (err) {
+      if (err.name === 'AbortError') throw err;
+      console.warn('Valhalla:', err.message);
+      routes = await osrmRoutes(from, to, signal, true);
+    }
+    // Fast: the briskest average speed. Slow: the calmest.
+    return { route: pick(routes, (r) => (mode === 'fast' ? -avgSpeed(r) : avgSpeed(r))) };
+  }
+
+  if (mode === 'no-lights') {
+    const results = await Promise.allSettled([
+      osrmRoutes(from, to, signal, true),
+      valhallaRoutes(from, to, FAST_COSTING, signal),
+      valhallaRoutes(from, to, SLOW_COSTING, signal),
+    ]);
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    const routes = distinct(results.flatMap((r) => (r.status === 'fulfilled' ? r.value : [])));
+    if (!routes.length) throw results.find((r) => r.reason instanceof NoRouteError)?.reason ?? results[0].reason;
+    routes.sort((a, b) => a.duration - b.duration);
+    const candidates = routes.filter((r) => r.duration <= routes[0].duration * MAX_DETOUR_FOR_LIGHTS).slice(0, 6);
+    return { route: candidates[0], candidates };
+  }
+
+  return { route: (await osrmRoutes(from, to, signal))[0] };
+}
+
+// Traffic lights on each route (pedestrian ones too), in one light Overpass
+// query that only returns counts.
+export async function countLights(routes) {
+  const query = routes
+    .map((route) => {
+      const path = simplify(route.line.coords, 4)
+        .map(([lng, lat]) => `${lat.toFixed(6)},${lng.toFixed(6)}`)
+        .join(',');
+      return `node(around:8,${path})[~"^(highway|crossing)$"~"^traffic_signals$"];out count;`;
+    })
+    .join('\n');
+  const data = await overpass(`[out:json][timeout:60];\n${query}`);
+  return data.elements.filter((e) => e.type === 'count').map((e) => Number(e.tags.nodes));
+}
+
+// Fewest lights wins; between equals, the quicker one.
+export function fewestLights(routes, counts) {
+  let best = 0;
+  routes.forEach((route, i) => {
+    if (counts[i] < counts[best] || (counts[i] === counts[best] && route.duration < routes[best].duration)) best = i;
+  });
+  return best;
 }
 
 function buildRoute(osrm) {

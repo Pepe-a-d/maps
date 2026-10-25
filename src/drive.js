@@ -2,20 +2,25 @@ import * as maplibregl from 'maplibre-gl';
 import { angleDiff, bearing, distance, lerp } from './geo.js';
 import {
   NoRouteError,
-  fetchRoute,
+  ROUTE_MODES,
+  countLights,
+  fewestLights,
   formatDistance,
   loadRouteDetails,
   maneuverIcon,
+  findRoute,
   matchItems,
   remainingSeconds,
   turnSpeed,
 } from './routing.js';
+import { settings } from './settings.js';
 import { iconDataUrl } from './traffic.js';
 
-// Driving mode laid out like a modern bike TFT dashboard: a status strip with
-// warning lamps, tiles for the next turn, the next sign (the star of the show)
-// and speed with a segmented bar, a row of trip data, and the map in a window
-// that turns with the bike. A simulator drives the route from a desk.
+// Driving mode laid out like a modern bike TFT dashboard: tiles for the next
+// turn, the next sign (the star of the show) and speed with a segmented bar,
+// and the map in a window that turns with the bike. Clock and lamps, the signs
+// after the next one and trip data are optional (settings). A simulator drives
+// the route from a desk.
 
 const ACCENT = '#4c8dff';
 const SIM_SPEEDS = [1, 2, 4];
@@ -41,17 +46,6 @@ const CAT_COLOR = {
   sign: '#f4f4f1',
 };
 
-const PLURAL = {
-  signals: ['semáforo', 'semáforos'],
-  crossing: ['paso de peatones', 'pasos de peatones'],
-  stop: ['stop', 'stops'],
-  give_way: ['ceda el paso', 'ceda el paso'],
-  sign: ['señal', 'señales'],
-  camera: ['radar', 'radares'],
-  calming: ['reductor', 'reductores'],
-  rail: ['paso a nivel', 'pasos a nivel'],
-};
-
 const ICONS = {
   pause: '<svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>',
   play: '<svg viewBox="0 0 24 24"><path d="M7 4.5v15L19.5 12z" fill="currentColor"/></svg>',
@@ -72,15 +66,6 @@ const timeOfDay = (date) => date.toLocaleTimeString('es-ES', { hour: '2-digit', 
 
 // "120 m" → ["120", "m"], to draw the number big and the unit small.
 const splitDistance = (m) => formatDistance(m).split(' ');
-
-function countsText(items) {
-  const counts = {};
-  for (const item of items) counts[item.cat] = (counts[item.cat] ?? 0) + 1;
-  return Object.entries(PLURAL)
-    .filter(([cat]) => counts[cat])
-    .map(([cat, [one, many]]) => `${counts[cat]} ${counts[cat] === 1 ? one : many}`)
-    .join(' · ');
-}
 
 function currentPosition() {
   return new Promise((resolve) => {
@@ -161,26 +146,23 @@ export function setupDriving(map, traffic, basemap) {
       <section class="hud">
         <div class="hud-window"></div>
 
-        <header class="hud-status">
-          <b class="hud-status__clock">--:--</b>
-          <span class="hud-status__dest"></span>
-          <span class="hud-lamps">
-            <i class="lamp lamp--gps" title="GPS">${ICONS.gps}</i>
-            <i class="lamp lamp--radar" title="Radar cerca">${ICONS.radar}</i>
-            <i class="lamp lamp--limit" title="Por encima del límite">${ICONS.limit}</i>
-            <i class="lamp lamp--sim" title="Simulación">SIM</i>
-          </span>
-        </header>
-
         <div class="hud-side">
+          <header class="hud-status">
+            <b class="hud-status__clock">--:--</b>
+            <span class="hud-lamps">
+              <i class="lamp lamp--gps" title="GPS">${ICONS.gps}</i>
+              <i class="lamp lamp--radar" title="Radar cerca">${ICONS.radar}</i>
+              <i class="lamp lamp--limit" title="Por encima del límite">${ICONS.limit}</i>
+              <i class="lamp lamp--sim" title="Simulación">SIM</i>
+            </span>
+          </header>
+
           <div class="tile hud-turn">
-            <span class="tile__label">Giro</span>
             <div class="hud-turn__icon"></div>
             <div class="hud-turn__dist"><b></b><small></small></div>
           </div>
 
           <div class="tile hud-sign">
-            <span class="tile__label">Próxima señal</span>
             <div class="hud-sign__main" hidden>
               <img class="hud-sign__icon" alt="" width="88" height="88"/>
               <div class="hud-sign__body">
@@ -202,18 +184,19 @@ export function setupDriving(map, traffic, basemap) {
               <img class="hud-limit" alt="" width="64" height="64" hidden/>
             </div>
           </div>
+
+          <div class="hud-trip">
+            <div class="tile hud-stat"><span class="tile__label">Llegada</span><b data-f="eta">--:--</b></div>
+            <div class="tile hud-stat"><span class="tile__label">Restante</span><b data-f="time">-</b></div>
+            <div class="tile hud-stat"><span class="tile__label">Distancia</span><b data-f="dist">-</b></div>
+          </div>
         </div>
 
-        <footer class="hud-bar">
-          <div class="tile hud-stat"><span class="tile__label">Llegada</span><b data-f="eta">--:--</b></div>
-          <div class="tile hud-stat"><span class="tile__label">Restante</span><b data-f="time">-</b></div>
-          <div class="tile hud-stat"><span class="tile__label">Distancia</span><b data-f="dist">-</b></div>
-          <div class="hud-controls">
-            <button class="hud-btn sim-only" data-act="pause" aria-label="Pausa"></button>
-            <button class="hud-btn sim-only hud-btn--text" data-act="simspeed" aria-label="Velocidad de simulación"></button>
-            <button class="hud-btn hud-btn--exit" data-act="exit" aria-label="Salir">${ICONS.close}</button>
-          </div>
-        </footer>
+        <div class="hud-controls">
+          <button class="hud-btn sim-only" data-act="pause" aria-label="Pausa"></button>
+          <button class="hud-btn sim-only hud-btn--text" data-act="simspeed" aria-label="Velocidad de simulación"></button>
+          <button class="hud-btn hud-btn--exit" data-act="exit" aria-label="Salir">${ICONS.close}</button>
+        </div>
 
         <button class="nav-btn hud-recenter" data-act="recenter" hidden>Recentrar</button>
         <div class="hud-toast" hidden></div>
@@ -245,7 +228,6 @@ export function setupDriving(map, traffic, basemap) {
       simBtn: $('[data-act="sim"]'),
       window: $('.hud-window'),
       clock: $('.hud-status__clock'),
-      statusDest: $('.hud-status__dest'),
       lampGps: $('.lamp--gps'),
       lampRadar: $('.lamp--radar'),
       lampLimit: $('.lamp--limit'),
@@ -301,12 +283,20 @@ export function setupDriving(map, traffic, basemap) {
     ui.root.dataset.state = next;
     document.body.classList.toggle('nav-on', next !== 'off');
     document.body.classList.toggle('driving', driving);
-    if (driving !== wasDriving) {
-      // On the road: black map only, and just the lights/signs on the route.
-      basemap.force(driving ? 'map' : null);
-      traffic.setVisible(!driving);
-    }
+    // On the road: black map only.
+    if (driving !== wasDriving) basemap.force(driving ? 'map' : null);
   }
+
+  // Optional bits of the HUD, off unless switched on in the settings.
+  function applyHudSettings() {
+    ui.root.classList.toggle('show-status', settings.get('hudStatus'));
+    ui.root.classList.toggle('show-more', settings.get('hudMoreSigns'));
+    ui.root.classList.toggle('show-trip', settings.get('hudTrip'));
+    if (mode === 'driving') requestAnimationFrame(applyLayout);
+  }
+  settings.onChange((key) => {
+    if (key.startsWith('hud')) applyHudSettings();
+  });
 
   function renderButtons() {
     ui.root.classList.toggle('is-sim', Boolean(sim));
@@ -335,18 +325,17 @@ export function setupDriving(map, traffic, basemap) {
 
   function refreshSheet() {
     if (mode !== 'preview' || !route) return;
-    const details =
-      route.detailsState === 'loading'
-        ? 'Buscando semáforos y señales…'
-        : route.detailsState === 'error'
-          ? 'No se pudieron cargar las señales (servidores ocupados).'
-          : route.items.length
-            ? countsText(route.items)
-            : 'Sin semáforos ni señales mapeados en la ruta.';
+    const lights = route.items.filter((item) => item.cat === 'signals').length;
+    const cameras = route.items.filter((item) => item.cat === 'camera').length;
+    const found =
+      route.detailsState === 'done'
+        ? [lights ? `${lights} ${lights === 1 ? 'semáforo' : 'semáforos'}` : 'Sin semáforos', cameras && `${cameras} ${cameras === 1 ? 'radar' : 'radares'}`]
+        : [route.detailsState === 'loading' && 'buscando semáforos…'];
+    const modeLabel = ROUTE_MODES.find((m) => m.id === settings.get('routeMode'))?.label;
     sheet({
       summary: `${formatDistance(route.line.length)} · ${formatDuration(route.duration)}`,
-      extras: route.detailsState === 'loading' && route.items.length ? `${countsText(route.items)} · buscando más…` : details,
-      note: origin.gps ? '' : 'Sin GPS: la ruta sale del punto que elegiste. Puedes simularla.',
+      extras: [modeLabel, route.lightsNote ?? '', ...found].filter(Boolean).join(' · '),
+      note: origin.gps ? '' : 'Sin GPS: sale del punto que elegiste. Puedes simularla.',
       canGo: origin.gps,
       canSim: true,
     });
@@ -445,9 +434,14 @@ export function setupDriving(map, traffic, basemap) {
   function fitRoute() {
     const bounds = new maplibregl.LngLatBounds();
     for (const c of route.line.coords) bounds.extend(c);
-    const sheetHeight = ui.root.querySelector('.nav-sheet').offsetHeight || 220;
+    // Leave room for the sheet: below the route, or beside it on a phone held sideways.
+    const box = ui.root.querySelector('.nav-sheet').getBoundingClientRect();
+    const { clientWidth: w, clientHeight: h } = map.getContainer();
+    const beside = box.left > w / 2;
     map.fitBounds(bounds, {
-      padding: { top: 80, left: 40, right: 80, bottom: sheetHeight + 40 },
+      padding: beside
+        ? { top: 40, left: 40, right: w - box.left + 30, bottom: 40 }
+        : { top: 80, left: 40, right: 80, bottom: h - box.top + 30 },
       maxZoom: 17,
       bearing: 0,
       duration: 1200,
@@ -461,7 +455,7 @@ export function setupDriving(map, traffic, basemap) {
     dest = { lngLat, name };
     setMode('locating');
     sheet({ summary: 'Buscando tu ubicación…' });
-    traffic.setPaused(true);
+    traffic.setDriving(true);
     flagMarker.setLngLat(lngLat).addTo(map);
 
     const here = await currentPosition();
@@ -480,12 +474,15 @@ export function setupDriving(map, traffic, basemap) {
     sheet({ summary: 'Calculando ruta…' });
     abort = new AbortController();
     try {
-      const next = await fetchRoute(origin.lngLat, dest.lngLat, abort.signal);
+      const { route: next, candidates } = await findRoute(origin.lngLat, dest.lngLat, settings.get('routeMode'), abort.signal);
       if (mode !== 'routing') return;
-      setRoute(next);
+      const comparing = candidates?.length > 1;
+      // While comparing, hold the sign download: it's for whichever route wins.
+      setRoute(next, !comparing);
       setMode('preview');
       refreshSheet();
       fitRoute();
+      if (comparing) pickFewestLights(next, candidates);
     } catch (err) {
       if (err.name === 'AbortError') return;
       console.error(err);
@@ -494,14 +491,37 @@ export function setupDriving(map, traffic, basemap) {
     }
   }
 
-  function setRoute(next) {
+  // "No lights": show the quickest route at once, then switch to the one with
+  // fewer lights when the count arrives (if you haven't set off yet).
+  async function pickFewestLights(shown, candidates) {
+    shown.lightsNote = 'comparando rutas…';
+    refreshSheet();
+    let best = shown;
+    try {
+      const counts = await countLights(candidates);
+      best = candidates[fewestLights(candidates, counts)];
+    } catch {
+      // Keep the quickest.
+    }
+    shown.lightsNote = null;
+    if (route !== shown || mode !== 'preview') return;
+    if (best !== shown) {
+      setRoute(best);
+      fitRoute();
+    } else if (!shown.detailsState) {
+      loadDetails(shown);
+    }
+    refreshSheet();
+  }
+
+  function setRoute(next, withDetails = true) {
     route = next;
     along = 0;
     shownStep = -1;
     shownItems = '';
     shownMapItems = '';
     drawRoute();
-    loadDetails(next);
+    if (withDetails) loadDetails(next);
     buildSimStops();
   }
 
@@ -531,6 +551,7 @@ export function setupDriving(map, traffic, basemap) {
 
   function start(simulated) {
     if (!route) return;
+    if (!route.detailsState) loadDetails(route); // set off before the light count came back
     stats = { time: 0, dist: 0, maxSpeed: 0, start: performance.now() };
     sim = simulated ? { mult: 1, paused: false, wait: 0, stops: [] } : null;
     along = 0;
@@ -541,7 +562,7 @@ export function setupDriving(map, traffic, basemap) {
     follow = true;
     shownRev = -1;
     setMode('driving');
-    ui.statusDest.textContent = dest?.name ?? '';
+    applyHudSettings();
     buildSimStops();
     renderButtons();
     ui.recenter.hidden = true;
@@ -662,7 +683,7 @@ export function setupDriving(map, traffic, basemap) {
     lastReroute = performance.now();
     toast('Recalculando ruta…', 0);
     try {
-      setRoute(await fetchRoute(from, dest.lngLat));
+      setRoute((await findRoute(from, dest.lngLat, settings.get('routeMode'))).route);
       gps.along = 0;
       gps.off = 0;
       toast('Ruta actualizada');
@@ -909,18 +930,12 @@ export function setupDriving(map, traffic, basemap) {
     cancelAnimationFrame(raf);
     stopGps();
     setMode('finished');
-    const passed = route.items.filter((item) => item.along <= along);
-    const count = (cat) => passed.filter((item) => item.cat === cat).length;
     const avg = stats.time ? (stats.dist / stats.time) * 3.6 : 0;
     const rows = [
       ['Tiempo', clock(stats.time)],
       ['Distancia', formatDistance(stats.dist)],
       ['Vel. media', `${Math.round(avg)} km/h`],
       ['Vel. máxima', `${Math.round(stats.maxSpeed * 3.6)} km/h`],
-      ['Semáforos', count('signals')],
-      ['Pasos de peatones', count('crossing')],
-      ['Stops y ceda', count('stop') + count('give_way')],
-      ['Radares', count('camera')],
     ];
     ui.finishStats.replaceChildren(
       ...rows.map(([label, value]) => {
@@ -960,7 +975,7 @@ export function setupDriving(map, traffic, basemap) {
     shownMapItems = '';
     ui.toast.hidden = true;
     setMode('off');
-    traffic.setPaused(false);
+    traffic.setDriving(false);
     map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
     if (wasDriving) map.easeTo({ bearing: 0, zoom: Math.min(map.getZoom(), 16), duration: 1000 });
   }

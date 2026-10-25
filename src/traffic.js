@@ -1,4 +1,5 @@
 import * as maplibregl from 'maplibre-gl';
+import { settings } from './settings.js';
 import { lngLatToTile } from './tiles.js';
 
 // Traffic lights, signs and friends from OpenStreetMap, loaded through Overpass
@@ -468,8 +469,7 @@ export function setupTraffic(map) {
   let inFlight = false;
   let queued = false;
   let retry;
-  let paused = false;
-  let state = 'idle'; // idle | far | loading | error
+  let driving = false; // the route brings its own data and draws its own icons
 
   let enabled = new Set(CATEGORIES.map((c) => c.id));
   try {
@@ -479,7 +479,8 @@ export function setupTraffic(map) {
     // Fall back to everything on.
   }
 
-  const ui = buildPanel();
+  // Icons only show, and only load, when they're switched on in the settings.
+  const wanted = () => settings.get('trafficIcons') && !driving;
 
   // ---- Map layer ----
 
@@ -497,6 +498,7 @@ export function setupTraffic(map) {
         'icon-allow-overlap': true,
         'icon-ignore-placement': true,
         'symbol-sort-key': ['get', 'rank'],
+        visibility: wanted() ? 'visible' : 'none',
       },
       filter: categoryFilter(),
     });
@@ -536,19 +538,22 @@ export function setupTraffic(map) {
     map.getSource(SOURCE)?.setData(toGeoJSON());
   }
 
+  function applyVisibility() {
+    if (map.getLayer(TRAFFIC_LAYER)) map.setLayoutProperty(TRAFFIC_LAYER, 'visibility', wanted() ? 'visible' : 'none');
+    update();
+  }
+
   // ---- Loading ----
 
   async function update() {
-    if (paused) return;
-    if (map.getZoom() < MIN_ZOOM) return render('far');
-    if (!enabled.size) return render('idle');
+    if (!wanted() || !enabled.size || map.getZoom() < MIN_ZOOM) return;
     if (inFlight) {
       queued = true;
-      return render(state);
+      return;
     }
 
     const missing = visibleTiles(map).filter((key) => !tiles.has(key));
-    if (!missing.length) return render('idle');
+    if (!missing.length) return;
     clearTimeout(retry);
 
     inFlight = true;
@@ -565,7 +570,6 @@ export function setupTraffic(map) {
       });
 
       if (toFetch.length) {
-        render('loading');
         toFetch.forEach((key) => tiles.set(key, 'loading'));
         const boxes = toFetch.map((key) => tileBounds(...key.split('/').map(Number), TILE_Z));
         const union = {
@@ -589,10 +593,8 @@ export function setupTraffic(map) {
             tiles.set(key, 'done');
             writeCache(key, list);
           }
-          state = 'idle';
         } catch {
           toFetch.forEach((key) => tiles.delete(key));
-          state = 'error';
           retry = setTimeout(update, RETRY_MS);
         }
       }
@@ -603,8 +605,6 @@ export function setupTraffic(map) {
     if (queued) {
       queued = false;
       update();
-    } else {
-      render(state);
     }
   }
 
@@ -620,6 +620,10 @@ export function setupTraffic(map) {
     };
     if (wait <= 0) run();
     else trailing = setTimeout(run, wait);
+  });
+
+  settings.onChange((key) => {
+    if (key === 'trafficIcons') applyVisibility();
   });
 
   // ---- Popups ----
@@ -642,109 +646,32 @@ export function setupTraffic(map) {
       p.textContent = line;
       box.append(p);
     }
-    const link = document.createElement('a');
-    link.href = `https://www.openstreetmap.org/node/${node.id}`;
-    link.target = '_blank';
-    link.rel = 'noopener';
-    link.textContent = 'Ver en OpenStreetMap ↗';
-    box.append(link);
-
     popup.setLngLat([node.lon, node.lat]).setDOMContent(box).addTo(map);
   });
 
   map.on('mouseenter', TRAFFIC_LAYER, () => (map.getCanvas().style.cursor = 'pointer'));
   map.on('mouseleave', TRAFFIC_LAYER, () => (map.getCanvas().style.cursor = ''));
 
-  // ---- Panel ----
-
-  function buildPanel() {
-    const root = document.createElement('div');
-    root.className = 'traffic';
-    root.innerHTML = `
-      <button class="traffic__toggle" type="button" aria-expanded="false">
-        <span class="traffic__title">Tráfico</span>
-        <span class="traffic__status"></span>
-        <svg class="traffic__chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-      </button>
-      <div class="traffic__panel" hidden>
-        <ul class="traffic__list"></ul>
-        <p class="traffic__note">Datos de OpenStreetMap: puede faltar algo o estar desactualizado.</p>
-      </div>`;
-
-    const toggle = root.querySelector('.traffic__toggle');
-    const panel = root.querySelector('.traffic__panel');
-    toggle.addEventListener('click', () => {
-      panel.hidden = !panel.hidden;
-      toggle.setAttribute('aria-expanded', String(!panel.hidden));
-    });
-
-    const counts = {};
-    const list = root.querySelector('.traffic__list');
-    for (const cat of CATEGORIES) {
-      const li = document.createElement('li');
-      li.innerHTML = `
-        <label class="traffic__row">
-          <input type="checkbox" />
-          <img alt="" width="22" height="22" />
-          <span class="traffic__label"></span>
-          <span class="traffic__count"></span>
-        </label>`;
-      const input = li.querySelector('input');
-      input.checked = enabled.has(cat.id);
-      input.addEventListener('change', () => {
-        if (input.checked) enabled.add(cat.id);
-        else enabled.delete(cat.id);
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify([...enabled]));
-        } catch {
-          // Not remembered next time; no big deal.
-        }
-        if (map.getLayer(TRAFFIC_LAYER)) map.setFilter(TRAFFIC_LAYER, categoryFilter());
-        update();
-      });
-      li.querySelector('img').src = iconDataUrl(cat.icon);
-      li.querySelector('.traffic__label').textContent = cat.label;
-      counts[cat.id] = li.querySelector('.traffic__count');
-      list.append(li);
-    }
-
-    document.body.append(root);
-    return { status: root.querySelector('.traffic__status'), counts };
-  }
-
-  function render(next) {
-    state = next;
-    const near = map.getZoom() >= MIN_ZOOM;
-    const bounds = map.getBounds();
-    const totals = Object.fromEntries(CATEGORIES.map((c) => [c.id, 0]));
-    if (near) {
-      for (const n of nodes.values()) if (bounds.contains([n.lon, n.lat])) totals[n.cat]++;
-    }
-    for (const cat of CATEGORIES) ui.counts[cat.id].textContent = near ? totals[cat.id] : '';
-
-    const visible = CATEGORIES.reduce((sum, c) => sum + (enabled.has(c.id) ? totals[c.id] : 0), 0);
-    ui.status.className = `traffic__status traffic__status--${state}`;
-    ui.status.textContent = {
-      far: 'Acércate para verlos',
-      loading: 'Cargando…',
-      error: 'Servidores ocupados, reintentando…',
-      idle: enabled.size ? `${visible} en pantalla` : 'Todo oculto',
-    }[state];
-  }
-
-  render(map.getZoom() >= MIN_ZOOM ? 'idle' : 'far');
-
   return {
     getNodes: () => [...nodes.values()],
     addNodes,
-    // While driving, the route brings its own data; don't compete with it for Overpass.
-    setPaused(value) {
-      paused = value;
-      if (!paused) update();
+    // While planning or driving, the route brings its own data and icons;
+    // don't compete with it for Overpass, and don't clutter the map.
+    setDriving(value) {
+      driving = value;
+      applyVisibility();
     },
-    // The driving view draws only what's on the route, bigger.
-    setVisible(visible) {
-      if (map.getLayer(TRAFFIC_LAYER)) map.setLayoutProperty(TRAFFIC_LAYER, 'visibility', visible ? 'visible' : 'none');
+    categories: () => CATEGORIES.map((c) => ({ ...c, on: enabled.has(c.id) })),
+    setCategory(id, on) {
+      if (on) enabled.add(id);
+      else enabled.delete(id);
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify([...enabled]));
+      } catch {
+        // Not remembered next time; no big deal.
+      }
+      if (map.getLayer(TRAFFIC_LAYER)) map.setFilter(TRAFFIC_LAYER, categoryFilter());
+      update();
     },
   };
 }
