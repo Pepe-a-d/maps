@@ -8,25 +8,36 @@ import {
   maneuverIcon,
   matchItems,
   remainingSeconds,
-  spokenDistance,
   turnSpeed,
 } from './routing.js';
 import { iconDataUrl } from './traffic.js';
 
-// Driving mode: a video-game style navigator. Chase camera behind a neon car,
-// glowing route, next turn, upcoming lights/signs with a countdown, speedometer
-// with the speed limit, voice, and a simulator to drive the route from a desk.
+// Driving mode, Need for Speed style: a top-down radar view that turns with the
+// car, the glowing route, the next turn as an arrow, and the lights and signs
+// ahead as the stars of the HUD. A simulator drives the route from a desk.
 
 const NEON = '#2ef2ff';
 const PINK = '#ff3df2';
-const PITCH = 62;
 const SIM_SPEEDS = [1, 2, 4];
-const VOICE_KEY = 'maps-drive-voice';
 const GAUGE_MAX_KMH = 160;
 const ARRIVE_M = 15;
 const OFF_ROUTE_M = 30;
+const ITEMS_AHEAD_M = 2000; // how far ahead the map shows lights and signs
+const CAR_Y = 0.63; // the car sits a bit low so you see more of what's coming
 
-const SOURCES = { full: 'nav-full', left: 'nav-left', next: 'nav-next' };
+const SOURCES = { full: 'nav-full', left: 'nav-left', next: 'nav-next', items: 'nav-items' };
+
+// Accent per kind of item, shared by the map halos and the HUD cards.
+const CAT_COLOR = {
+  signals: '#ffcc00',
+  stop: '#ff3b45',
+  give_way: '#ff3b45',
+  rail: '#ff3b45',
+  camera: '#ff9800',
+  calming: '#ff9800',
+  crossing: '#2f8cff',
+  sign: '#ffffff',
+};
 
 const PLURAL = {
   signals: ['semáforo', 'semáforos'],
@@ -38,24 +49,21 @@ const PLURAL = {
   calming: ['reductor', 'reductores'],
   rail: ['paso a nivel', 'pasos a nivel'],
 };
-const SPOKEN_ITEMS = { camera: 'Radar', stop: 'Stop', rail: 'Paso a nivel' };
 
 const ICONS = {
-  voiceOn:
-    '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
-  voiceOff:
-    '<svg viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path d="m16 9 5 6m0-6-5 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   pause: '<svg viewBox="0 0 24 24"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>',
   play: '<svg viewBox="0 0 24 24"><path d="M7 4.5v15L19.5 12z" fill="currentColor"/></svg>',
   close:
     '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>',
-  car: `<svg viewBox="0 0 48 48" width="48" height="48"><path d="M24 3 41 43 24 33.5 7 43Z" fill="#06181c" stroke="${NEON}" stroke-width="3" stroke-linejoin="round"/><path d="M24 12 33 35 24 29.5 15 35Z" fill="${NEON}" opacity=".35"/></svg>`,
+  car: `<svg viewBox="0 0 48 48" width="52" height="52"><path d="M24 3 41 43 24 33.5 7 43Z" fill="#06181c" stroke="${NEON}" stroke-width="3" stroke-linejoin="round"/><path d="M24 12 33 35 24 29.5 15 35Z" fill="${NEON}" opacity=".35"/></svg>`,
 };
 
 const formatDuration = (s) =>
   s < 3600 ? `${Math.max(1, Math.round(s / 60))} min` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
 const clock = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
-const lowerFirst = (text) => text.charAt(0).toLowerCase() + text.slice(1);
+
+// "120 m" → ["120", "m"], to draw the number big and the unit small.
+const splitDistance = (m) => formatDistance(m).split(' ');
 
 function countsText(items) {
   const counts = {};
@@ -77,7 +85,7 @@ function currentPosition() {
   });
 }
 
-export function setupDriving(map, traffic) {
+export function setupDriving(map, traffic, basemap) {
   // off | locating | pick-origin | routing | preview | driving | finished
   let mode = 'off';
   let route = null;
@@ -106,21 +114,14 @@ export function setupDriving(map, traffic) {
   let lastHud = 0;
   let shownStep = -1; // what the HUD currently shows, to skip rebuilding it
   let shownItems = '';
+  let shownMapItems = '';
   let stats = null;
-  let spoken = new Set();
   let wakeLock = null;
-  let voiceOn = true;
-  try {
-    voiceOn = localStorage.getItem(VOICE_KEY) !== 'off';
-  } catch {
-    // Default on.
-  }
 
   const ui = buildUi();
   const carMarker = new maplibregl.Marker({
     element: Object.assign(document.createElement('div'), { className: 'nav-car', innerHTML: ICONS.car }),
     rotationAlignment: 'map',
-    pitchAlignment: 'map',
   });
   const flagMarker = new maplibregl.Marker({
     element: Object.assign(document.createElement('div'), { className: 'nav-flag', innerHTML: maneuverIcon({ type: 'arrive' }) }),
@@ -149,28 +150,49 @@ export function setupDriving(map, traffic) {
       </section>
 
       <section class="hud">
+        <div class="hud-radar" aria-hidden="true">
+          <svg viewBox="-100 -100 200 200">
+            <circle class="hud-radar__ring" r="97"/>
+            <circle class="hud-radar__ticks" r="91" pathLength="360"/>
+            <g class="hud-radar__north">
+              <path d="M0 -100 L7 -88 L-7 -88Z"/>
+              <text y="-73">N</text>
+            </g>
+          </svg>
+        </div>
+
         <div class="hud-turn">
           <div class="hud-turn__icon"></div>
-          <div class="hud-turn__body">
-            <div class="hud-turn__dist"></div>
-            <div class="hud-turn__text"></div>
-          </div>
+          <div class="hud-turn__dist"><b></b><small></small></div>
         </div>
-        <div class="hud-then" hidden><span>Luego</span><i></i></div>
 
-        <div class="hud-next">
-          <div class="nav-kicker">Próximos</div>
-          <ol class="hud-next__list"></ol>
-          <p class="hud-next__empty"></p>
+        <div class="hud-hazard">
+          <div class="hud-hazard__main" hidden>
+            <img class="hud-hazard__icon" alt="" width="84" height="84"/>
+            <div class="hud-hazard__body">
+              <div class="hud-hazard__dist"><b></b><small></small></div>
+              <div class="hud-hazard__title"></div>
+            </div>
+            <i class="hud-hazard__bar"><i></i></i>
+          </div>
+          <ol class="hud-hazard__more"></ol>
+          <p class="hud-hazard__empty"></p>
         </div>
 
         <div class="hud-speed">
           <div class="hud-limit" hidden><span></span></div>
           <div class="hud-gauge">
             <svg viewBox="0 0 120 120" aria-hidden="true">
-              <path class="hud-gauge__ticks" d="M31.7 88.3A40 40 0 1 1 88.3 88.3" pathLength="100"/>
+              <defs>
+                <linearGradient id="hud-gauge-grad" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0" stop-color="${NEON}"/>
+                  <stop offset="0.6" stop-color="${PINK}"/>
+                  <stop offset="1" stop-color="#ff3b45"/>
+                </linearGradient>
+              </defs>
               <path class="hud-gauge__track" d="M26.1 93.9A48 48 0 1 1 93.9 93.9" pathLength="100"/>
-              <path class="hud-gauge__value" d="M26.1 93.9A48 48 0 1 1 93.9 93.9" pathLength="100"/>
+              <path class="hud-gauge__value" d="M26.1 93.9A48 48 0 1 1 93.9 93.9" pathLength="100" stroke="url(#hud-gauge-grad)"/>
+              <path class="hud-gauge__cuts" d="M26.1 93.9A48 48 0 1 1 93.9 93.9" pathLength="100"/>
             </svg>
             <div class="hud-gauge__num">0</div>
             <div class="hud-gauge__unit">km/h</div>
@@ -182,7 +204,6 @@ export function setupDriving(map, traffic) {
           <div class="hud-trip__stat"><b data-f="time">-</b><small>restante</small></div>
           <div class="hud-trip__stat"><b data-f="dist">-</b><small>distancia</small></div>
           <div class="hud-trip__controls">
-            <button class="hud-btn" data-act="voice" aria-label="Voz"></button>
             <button class="hud-btn sim-only" data-act="pause" aria-label="Pausa"></button>
             <button class="hud-btn sim-only hud-btn--text" data-act="simspeed" aria-label="Velocidad de simulación"></button>
             <button class="hud-btn hud-btn--exit" data-act="exit" aria-label="Salir">${ICONS.close}</button>
@@ -215,14 +236,20 @@ export function setupDriving(map, traffic) {
       note: $('.nav-sheet__note'),
       go: $('[data-act="go"]'),
       simBtn: $('[data-act="sim"]'),
+      north: $('.hud-radar__north'),
+      northLabel: $('.hud-radar__north text'),
       turn: $('.hud-turn'),
       turnIcon: $('.hud-turn__icon'),
-      turnDist: $('.hud-turn__dist'),
-      turnText: $('.hud-turn__text'),
-      then: $('.hud-then'),
-      thenIcon: $('.hud-then i'),
-      list: $('.hud-next__list'),
-      empty: $('.hud-next__empty'),
+      turnNum: $('.hud-turn__dist b'),
+      turnUnit: $('.hud-turn__dist small'),
+      hazard: $('.hud-hazard__main'),
+      hazardIcon: $('.hud-hazard__icon'),
+      hazardNum: $('.hud-hazard__dist b'),
+      hazardUnit: $('.hud-hazard__dist small'),
+      hazardTitle: $('.hud-hazard__title'),
+      hazardBar: $('.hud-hazard__bar i'),
+      more: $('.hud-hazard__more'),
+      empty: $('.hud-hazard__empty'),
       limit: $('.hud-limit'),
       limitNum: $('.hud-limit span'),
       gauge: $('.hud-gauge'),
@@ -231,7 +258,6 @@ export function setupDriving(map, traffic) {
       eta: $('[data-f="eta"]'),
       time: $('[data-f="time"]'),
       dist: $('[data-f="dist"]'),
-      voice: $('[data-act="voice"]'),
       pause: $('[data-act="pause"]'),
       simSpeed: $('[data-act="simspeed"]'),
       recenter: $('.hud-recenter'),
@@ -246,16 +272,6 @@ export function setupDriving(map, traffic) {
     go: () => start(false),
     sim: () => start(true),
     recenter: () => setFollow(true),
-    voice() {
-      voiceOn = !voiceOn;
-      if (!voiceOn) window.speechSynthesis?.cancel();
-      try {
-        localStorage.setItem(VOICE_KEY, voiceOn ? 'on' : 'off');
-      } catch {
-        // Not remembered next time.
-      }
-      renderButtons();
-    },
     pause() {
       sim.paused = !sim.paused;
       renderButtons();
@@ -267,15 +283,21 @@ export function setupDriving(map, traffic) {
   };
 
   function setMode(next) {
+    const driving = next === 'driving' || next === 'finished';
+    const wasDriving = mode === 'driving' || mode === 'finished';
     mode = next;
     ui.root.hidden = next === 'off';
     ui.root.dataset.state = next;
     document.body.classList.toggle('nav-on', next !== 'off');
-    document.body.classList.toggle('driving', next === 'driving' || next === 'finished');
+    document.body.classList.toggle('driving', driving);
+    if (driving !== wasDriving) {
+      // Behind the wheel: black map only, and just the lights/signs on the route.
+      basemap.force(driving ? 'map' : null);
+      traffic.setVisible(!driving);
+    }
   }
 
   function renderButtons() {
-    ui.voice.innerHTML = voiceOn ? ICONS.voiceOn : ICONS.voiceOff;
     ui.root.classList.toggle('is-sim', Boolean(sim));
     if (sim) {
       ui.pause.innerHTML = sim.paused ? ICONS.play : ICONS.pause;
@@ -342,11 +364,12 @@ export function setupDriving(map, traffic) {
     const before = map.getStyle().layers.find((l) => l.type === 'symbol')?.id;
     const width = (min, max) => ['interpolate', ['exponential', 1.5], ['zoom'], 12, min, 18, max];
     const round = { 'line-join': 'round', 'line-cap': 'round' };
-    const layers = [
+    const catColor = ['match', ['get', 'cat'], ...Object.entries(CAT_COLOR).flat(), '#ffffff'];
+    const routeLayers = [
       { id: 'nav-done', source: SOURCES.full, type: 'line', layout: round, paint: { 'line-color': NEON, 'line-opacity': 0.2, 'line-width': width(3, 9) } },
-      { id: 'nav-glow', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': NEON, 'line-opacity': 0.35, 'line-blur': 6, 'line-width': width(9, 30) } },
-      { id: 'nav-line', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': NEON, 'line-width': width(4, 12) } },
-      { id: 'nav-core', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': '#e6fdff', 'line-width': width(1, 3.5) } },
+      { id: 'nav-glow', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': NEON, 'line-opacity': 0.35, 'line-blur': 6, 'line-width': width(10, 34) } },
+      { id: 'nav-line', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': NEON, 'line-width': width(5, 14) } },
+      { id: 'nav-core', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': '#e6fdff', 'line-width': width(1.5, 4) } },
       {
         id: 'nav-arrows',
         source: SOURCES.left,
@@ -359,34 +382,74 @@ export function setupDriving(map, traffic) {
           'icon-allow-overlap': true,
           'icon-ignore-placement': true,
           'icon-rotation-alignment': 'map',
-          'icon-pitch-alignment': 'map',
         },
         paint: { 'icon-opacity': 0.85 },
       },
-      { id: 'nav-next-glow', source: SOURCES.next, type: 'circle', paint: { 'circle-radius': 16, 'circle-color': PINK, 'circle-opacity': 0.25, 'circle-blur': 0.8, 'circle-pitch-alignment': 'map' } },
+      { id: 'nav-next-glow', source: SOURCES.next, type: 'circle', paint: { 'circle-radius': 18, 'circle-color': PINK, 'circle-opacity': 0.25, 'circle-blur': 0.8 } },
       {
         id: 'nav-next',
         source: SOURCES.next,
         type: 'circle',
-        paint: { 'circle-radius': 8, 'circle-color': '#000', 'circle-stroke-color': PINK, 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' },
+        paint: { 'circle-radius': 9, 'circle-color': '#000', 'circle-stroke-color': PINK, 'circle-stroke-width': 3 },
       },
     ];
-    for (const layer of layers) map.addLayer(layer, before);
+    for (const layer of routeLayers) map.addLayer(layer, before);
+
+    // Lights and signs on the route go on top of everything, big and haloed.
+    const itemLayers = [
+      {
+        id: 'nav-items-halo',
+        source: SOURCES.items,
+        type: 'circle',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 12, 18, 34],
+          'circle-color': catColor,
+          'circle-opacity': 0.3,
+          'circle-blur': 0.7,
+        },
+      },
+      {
+        id: 'nav-items-next',
+        source: SOURCES.items,
+        type: 'circle',
+        filter: ['==', ['get', 'next'], true],
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 15, 18, 40],
+          'circle-color': 'rgba(0,0,0,0)',
+          'circle-stroke-color': catColor,
+          'circle-stroke-width': 3,
+        },
+      },
+      {
+        id: 'nav-items',
+        source: SOURCES.items,
+        type: 'symbol',
+        layout: {
+          'icon-image': ['get', 'icon'],
+          'icon-size': ['interpolate', ['linear'], ['zoom'], 14, 0.75, 18, 1.4],
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
+          'symbol-sort-key': ['get', 'order'], // nearest on top
+        },
+      },
+    ];
+    for (const layer of itemLayers) map.addLayer(layer);
   }
 
   const lineFeature = (coords) => ({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords }, properties: {} });
+  const emptyCollection = { type: 'FeatureCollection', features: [] };
 
   function drawRoute() {
     ensureLayers();
     map.getSource(SOURCES.full).setData(lineFeature(route.line.coords));
     map.getSource(SOURCES.left).setData(lineFeature(route.line.coords));
-    map.getSource(SOURCES.next).setData({ type: 'FeatureCollection', features: [] });
+    map.getSource(SOURCES.next).setData(emptyCollection);
+    map.getSource(SOURCES.items).setData(emptyCollection);
   }
 
   function clearRoute() {
     if (!map.getSource(SOURCES.full)) return;
-    const empty = { type: 'FeatureCollection', features: [] };
-    for (const id of Object.values(SOURCES)) map.getSource(id).setData(empty);
+    for (const id of Object.values(SOURCES)) map.getSource(id).setData(emptyCollection);
   }
 
   function fitRoute() {
@@ -445,9 +508,9 @@ export function setupDriving(map, traffic) {
   function setRoute(next) {
     route = next;
     along = 0;
-    spoken = new Set();
     shownStep = -1;
     shownItems = '';
+    shownMapItems = '';
     drawRoute();
     loadDetails(next);
     buildSimStops();
@@ -470,6 +533,8 @@ export function setupDriving(map, traffic) {
     if (r !== route) return;
     refreshSheet();
     buildSimStops();
+    shownItems = '';
+    shownMapItems = '';
     lastHud = 0;
   }
 
@@ -483,19 +548,18 @@ export function setupDriving(map, traffic) {
     speed = 0;
     position = route.line.coords[0];
     heading = camBearing = route.line.bearingAt(0);
-    camZoom = 17.2;
+    camZoom = 17.6;
     follow = true;
     setMode('driving');
     buildSimStops();
     renderButtons();
-    applyPadding();
+    applyLayout();
     ui.recenter.hidden = true;
     carMarker.setLngLat(position).setRotation(heading).addTo(map);
-    map.jumpTo({ center: position, bearing: camBearing, pitch: PITCH, zoom: camZoom });
+    map.jumpTo({ center: position, bearing: camBearing, pitch: 0, zoom: camZoom });
 
     if (!simulated) startGps();
     requestWakeLock();
-    say(route.steps[0]?.text ?? 'Comenzamos');
     lastFrame = performance.now();
     lastHud = 0;
     cancelAnimationFrame(raf);
@@ -603,7 +667,6 @@ export function setupDriving(map, traffic) {
     rerouting = true;
     lastReroute = performance.now();
     toast('Recalculando ruta…', 0);
-    say('Recalculando');
     try {
       setRoute(await fetchRoute(from, dest.lngLat));
       gps.along = 0;
@@ -643,16 +706,20 @@ export function setupDriving(map, traffic) {
     heading = (heading + 360) % 360;
     carMarker.setLngLat(position).setRotation(heading);
 
-    // Chase camera: turns with the car, pulls back as you go faster.
+    // Radar camera: straight down, turning with the car, zooming out with speed.
     const kmh = speed * 3.6;
-    const zoomTarget = 17.4 - Math.min(1, Math.max(0, (kmh - 30) / 70)) * 1.6;
+    const zoomTarget = 17.6 - Math.min(1, Math.max(0, (kmh - 30) / 70)) * 1.5;
     camZoom += (zoomTarget - camZoom) * Math.min(1, dt * 1.5);
-    camBearing += angleDiff(camBearing, heading) * Math.min(1, dt * 2.5);
+    camBearing = (camBearing + angleDiff(camBearing, heading) * Math.min(1, dt * 2.5) + 360) % 360;
     if (!follow && resumeFollowAt && now > resumeFollowAt) {
       follow = true;
       resumeFollowAt = 0;
+      ui.root.classList.remove('is-free');
     }
-    if (follow) map.jumpTo({ center: position, bearing: camBearing, pitch: PITCH, zoom: camZoom });
+    if (follow) map.jumpTo({ center: position, bearing: camBearing, pitch: 0, zoom: camZoom });
+    // Keep the radar's N pointing north, with the letter upright.
+    ui.north.setAttribute('transform', `rotate(${-camBearing})`);
+    ui.northLabel.setAttribute('transform', `rotate(${camBearing} 0 -79)`);
 
     if (now - lastHud > 150) {
       lastHud = now;
@@ -667,10 +734,16 @@ export function setupDriving(map, traffic) {
 
   // ---------- HUD ----------
 
+  function setDistance(numEl, unitEl, m) {
+    const [num, unit] = splitDistance(m);
+    numEl.textContent = num;
+    unitEl.textContent = unit;
+  }
+
   function updateHud(kmh) {
     const { line, steps } = route;
 
-    // Next maneuver
+    // Next turn: just the arrow and how far.
     let k = steps.findIndex((s, i) => i > 0 && s.along > along + 2);
     if (k < 0) k = steps.length - 1;
     const step = steps[k];
@@ -678,49 +751,77 @@ export function setupDriving(map, traffic) {
     if (k !== shownStep) {
       shownStep = k;
       ui.turnIcon.innerHTML = maneuverIcon(step);
-      ui.turnText.textContent = step.text;
       ui.turn.classList.remove('is-new');
       void ui.turn.offsetWidth; // restart the flash animation
       ui.turn.classList.add('is-new');
-      const then = steps[k + 1];
-      ui.then.hidden = !(then && then.along - step.along < 150 && step.type !== 'arrive');
-      if (!ui.then.hidden) ui.thenIcon.innerHTML = maneuverIcon(then);
       const p = line.pointAt(step.along);
       map.getSource(SOURCES.next).setData({ type: 'Feature', geometry: { type: 'Point', coordinates: p }, properties: {} });
     }
-    ui.turnDist.textContent = formatDistance(toTurn);
+    setDistance(ui.turnNum, ui.turnUnit, toTurn);
     ui.turn.classList.toggle('is-now', toTurn < 60);
 
-    // Upcoming lights and signs
-    const upcoming = route.items.filter((item) => item.along > along - 2).slice(0, 3);
-    const key = upcoming.map((item) => item.id).join(',');
+    // Lights and signs: the next one big, the two after it small.
+    const upcoming = route.items.filter((item) => item.along > along - 2);
+    const [next, ...rest] = upcoming;
+    const more = rest.slice(0, 2);
+    const key = upcoming
+      .slice(0, 3)
+      .map((item) => item.id)
+      .join(',');
+    ui.hazard.hidden = !next;
     if (key !== shownItems) {
       shownItems = key;
-      ui.list.replaceChildren(
-        ...upcoming.map((item) => {
+      if (next) {
+        ui.hazard.dataset.cat = next.cat;
+        ui.hazard.style.setProperty('--c', CAT_COLOR[next.cat]);
+        ui.hazardIcon.src = iconDataUrl(next.icon);
+        ui.hazardTitle.textContent = next.title;
+        ui.hazard.classList.remove('is-new');
+        void ui.hazard.offsetWidth;
+        ui.hazard.classList.add('is-new');
+      }
+      ui.more.replaceChildren(
+        ...more.map((item) => {
           const li = document.createElement('li');
-          li.className = `hud-item hud-item--${item.cat}`;
-          li.innerHTML = '<img alt="" width="34" height="34"/><span class="hud-item__title"></span><b class="hud-item__dist"></b><i class="hud-item__bar"><i></i></i>';
+          li.style.setProperty('--c', CAT_COLOR[item.cat]);
+          li.innerHTML = '<img alt="" width="40" height="40"/><b></b>';
           li.querySelector('img').src = iconDataUrl(item.icon);
-          li.querySelector('.hud-item__title').textContent = item.title;
+          li.title = item.title;
           return li;
         }),
       );
     }
-    upcoming.forEach((item, i) => {
-      const li = ui.list.children[i];
-      const d = Math.max(0, item.along - along);
-      li.querySelector('.hud-item__dist').textContent = formatDistance(d);
-      li.querySelector('.hud-item__bar i').style.width = `${(1 - Math.min(d, 300) / 300) * 100}%`;
-      li.classList.toggle('is-close', d < 60);
+    if (next) {
+      const d = Math.max(0, next.along - along);
+      setDistance(ui.hazardNum, ui.hazardUnit, d);
+      ui.hazardBar.style.width = `${(1 - Math.min(d, 300) / 300) * 100}%`;
+      ui.hazard.classList.toggle('is-close', d < 60);
+    }
+    more.forEach((item, i) => {
+      ui.more.children[i].querySelector('b').textContent = formatDistance(Math.max(0, item.along - along));
     });
-    ui.empty.textContent = upcoming.length
+    ui.empty.textContent = next
       ? ''
       : route.detailsState === 'loading'
         ? 'Buscando semáforos y señales…'
         : route.detailsState === 'error'
           ? 'Sin datos de señales'
           : 'Vía libre';
+
+    // The same items on the map, only the stretch ahead.
+    const onMap = upcoming.filter((item) => item.along < along + ITEMS_AHEAD_M);
+    const mapKey = `${onMap[0]?.id}-${onMap.at(-1)?.id}-${onMap.length}`;
+    if (mapKey !== shownMapItems) {
+      shownMapItems = mapKey;
+      map.getSource(SOURCES.items).setData({
+        type: 'FeatureCollection',
+        features: onMap.map((item, i) => ({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: line.pointAt(item.along) },
+          properties: { icon: item.icon, cat: item.cat, next: i === 0, order: onMap.length - i },
+        })),
+      });
+    }
 
     // Speed
     const seg = line.segmentAt(along);
@@ -742,46 +843,18 @@ export function setupDriving(map, traffic) {
 
     // Throttle the remaining-route redraw along with the HUD.
     map.getSource(SOURCES.left).setData(lineFeature(line.sliceFrom(along)));
-
-    announce(k, step, toTurn, upcoming);
-  }
-
-  // ---------- Voice ----------
-
-  function say(text) {
-    if (!voiceOn || !('speechSynthesis' in window)) return;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'es-ES';
-    const voice = speechSynthesis.getVoices().find((v) => v.lang.startsWith('es'));
-    if (voice) utterance.voice = voice;
-    speechSynthesis.speak(utterance);
-  }
-
-  function announce(k, step, toTurn, upcoming) {
-    if (step.type !== 'arrive') {
-      const far = Math.max(250, speed * 15);
-      const near = Math.max(40, speed * 4);
-      if (toTurn <= near && !spoken.has(`near${k}`)) {
-        spoken.add(`near${k}`).add(`far${k}`);
-        say(step.text);
-      } else if (toTurn <= far && toTurn > near * 1.6 && !spoken.has(`far${k}`)) {
-        spoken.add(`far${k}`);
-        say(`En ${spokenDistance(toTurn)}, ${lowerFirst(step.text)}`);
-      }
-    }
-    for (const item of upcoming) {
-      const d = item.along - along;
-      if (SPOKEN_ITEMS[item.cat] && d < 160 && d > 20 && !spoken.has(`item${item.id}`)) {
-        spoken.add(`item${item.id}`);
-        say(`${SPOKEN_ITEMS[item.cat]} a ${spokenDistance(d)}`);
-      }
-    }
   }
 
   // ---------- Camera follow ----------
 
-  function applyPadding() {
-    map.setPadding({ top: Math.round(map.getContainer().clientHeight * 0.42), bottom: 0, left: 0, right: 0 });
+  // Put the car low on screen and center the radar ring on it.
+  function applyLayout() {
+    const { clientWidth: w, clientHeight: h } = map.getContainer();
+    const top = Math.round(h * (2 * CAR_Y - 1));
+    map.setPadding({ top, bottom: 0, left: 0, right: 0 });
+    ui.root.style.setProperty('--cx', `${w / 2}px`);
+    ui.root.style.setProperty('--cy', `${top + (h - top) / 2}px`);
+    ui.root.style.setProperty('--r', `${Math.round(Math.max(110, Math.min(260, Math.min(w, h) * 0.3)))}px`);
   }
 
   function setFollow(on) {
@@ -789,10 +862,11 @@ export function setupDriving(map, traffic) {
     if (!on) {
       follow = false;
       resumeFollowAt = 0;
+      ui.root.classList.add('is-free');
       return;
     }
-    // Glide back behind the car, then lock on again.
-    map.easeTo({ center: position, bearing: camBearing, pitch: PITCH, zoom: camZoom, duration: 700 });
+    // Glide back over the car, then lock on again.
+    map.easeTo({ center: position, bearing: camBearing, pitch: 0, zoom: camZoom, duration: 700 });
     resumeFollowAt = performance.now() + 700;
   }
 
@@ -802,7 +876,7 @@ export function setupDriving(map, traffic) {
     });
   }
   window.addEventListener('resize', () => {
-    if (mode === 'driving') applyPadding();
+    if (mode === 'driving') applyLayout();
   });
 
   // ---------- Wake lock ----------
@@ -824,7 +898,6 @@ export function setupDriving(map, traffic) {
     cancelAnimationFrame(raf);
     stopGps();
     setMode('finished');
-    say('Has llegado a tu destino');
     const passed = route.items.filter((item) => item.along <= along);
     const count = (cat) => passed.filter((item) => item.cat === cat).length;
     const avg = stats.time ? (stats.dist / stats.time) * 3.6 : 0;
@@ -863,7 +936,6 @@ export function setupDriving(map, traffic) {
     stopGps();
     wakeLock?.release().catch(() => {});
     wakeLock = null;
-    if ('speechSynthesis' in window) speechSynthesis.cancel();
     carMarker.remove();
     flagMarker.remove();
     clearRoute();
@@ -871,18 +943,18 @@ export function setupDriving(map, traffic) {
     sim = null;
     shownStep = -1;
     shownItems = '';
+    shownMapItems = '';
     ui.toast.hidden = true;
+    ui.root.classList.remove('is-free');
     setMode('off');
     traffic.setPaused(false);
     map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
-    if (wasDriving) map.easeTo({ pitch: 0, bearing: 0, zoom: Math.min(map.getZoom(), 16), duration: 1000 });
+    if (wasDriving) map.easeTo({ bearing: 0, zoom: Math.min(map.getZoom(), 16), duration: 1000 });
   }
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && mode !== 'off' && document.activeElement?.tagName !== 'INPUT') exit();
   });
-
-  renderButtons();
 
   return {
     planTo,

@@ -107,8 +107,8 @@ map.addControl(new maplibregl.FullscreenControl(), 'top-right');
 map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
 const traffic = setupTraffic(map);
-setupBasemapSwitch(map);
-const drive = setupDriving(map, traffic);
+const basemap = setupBasemapSwitch(map);
+const drive = setupDriving(map, traffic, basemap);
 
 // ---------- Coordinates under the cursor ----------
 

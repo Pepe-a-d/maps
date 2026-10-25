@@ -14,71 +14,10 @@ const ROADSIDE = new Set(['sign', 'camera']);
 
 export class NoRouteError extends Error {}
 
-// ---------- Text ----------
-
 export function formatDistance(m) {
   if (m >= 1000) return `${(m / 1000).toFixed(m >= 10000 ? 0 : 1).replace('.', ',')} km`;
   if (m >= 100) return `${Math.round(m / 10) * 10} m`;
   return `${Math.max(0, Math.round(m / 5) * 5)} m`;
-}
-
-export function spokenDistance(m) {
-  if (m >= 1000) {
-    const km = Math.round(m / 100) / 10;
-    return km === 1 ? '1 kilómetro' : `${String(km).replace('.', ',')} kilómetros`;
-  }
-  return `${m >= 100 ? Math.round(m / 50) * 50 : Math.round(m / 10) * 10} metros`;
-}
-
-const ORDINAL = ['primera', 'segunda', 'tercera', 'cuarta', 'quinta', 'sexta', 'séptima', 'octava'];
-
-const TURN = {
-  uturn: 'Cambia de sentido',
-  'sharp left': 'Gira bruscamente a la izquierda',
-  left: 'Gira a la izquierda',
-  'slight left': 'Gira ligeramente a la izquierda',
-  straight: 'Sigue recto',
-  'slight right': 'Gira ligeramente a la derecha',
-  right: 'Gira a la derecha',
-  'sharp right': 'Gira bruscamente a la derecha',
-};
-
-const side = (modifier = '') => (modifier.includes('left') ? 'izquierda' : modifier.includes('right') ? 'derecha' : '');
-
-function instruction({ maneuver: { type, modifier, exit }, name, ref, destinations }) {
-  const road = name || ref || '';
-  const onto = road ? ` por ${road}` : '';
-  const toward = destinations ? ` hacia ${destinations.split(':').pop().trim()}` : '';
-  const s = side(modifier);
-
-  switch (type) {
-    case 'depart':
-      return road ? `Sal por ${road}` : 'Comienza la ruta';
-    case 'arrive':
-      return s ? `Has llegado: el destino está a la ${s}` : 'Has llegado a tu destino';
-    case 'new name':
-      return `Continúa${onto}`;
-    case 'continue':
-      return modifier === 'straight' || !s ? `Continúa recto${onto}` : `Continúa a la ${s}${onto}`;
-    case 'merge':
-      return `Incorpórate${onto}`;
-    case 'on ramp':
-      return `Toma el acceso${s ? ` de la ${s}` : ''}${road ? ` a ${road}` : toward}`;
-    case 'off ramp':
-      return `Toma la salida${s ? ` de la ${s}` : ''}${toward || onto}`;
-    case 'fork':
-      return `En la bifurcación, mantente a la ${s || 'derecha'}${toward || onto}`;
-    case 'end of road':
-      return `Al final de la vía, gira a la ${s || 'derecha'}${onto}`;
-    case 'roundabout':
-    case 'rotary':
-      return exit ? `En la rotonda, toma la ${ORDINAL[exit - 1] ?? `${exit}.ª`} salida${onto}` : `Entra en la rotonda${onto}`;
-    case 'exit roundabout':
-    case 'exit rotary':
-      return `Sal de la rotonda${onto}`;
-    default:
-      return `${TURN[modifier] ?? 'Continúa'}${onto}`;
-  }
 }
 
 // ---------- Maneuver icons (inline SVG, colored with currentColor) ----------
@@ -187,8 +126,6 @@ function buildRoute(osrm) {
       along: step.maneuver.type === 'arrive' ? line.length : hit.along,
       type: step.maneuver.type,
       modifier: step.maneuver.modifier,
-      road: step.name || step.ref || '',
-      text: instruction(step),
     };
   });
 

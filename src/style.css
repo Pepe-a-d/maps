@@ -503,7 +503,7 @@ body {
   border-radius: 999px;
   background: rgba(4, 18, 22, 0.85);
   color: #2ef2ff;
-  font: 700 15px "Rajdhani", var(--font);
+  font: italic 800 14px "Exo 2", var(--font);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
@@ -532,21 +532,26 @@ body.driving .maplibregl-ctrl-bottom-left {
   display: none !important;
 }
 
-/* ---------- Navigator ---------- */
+/* ---------- Navigator: Need for Speed style ---------- */
 
 .nav {
   --neon: #2ef2ff;
   --pink: #ff3df2;
   --warn: #ffb020;
   --danger: #ff3b45;
-  --glass: rgba(4, 12, 16, 0.86);
+  --glass: rgba(3, 8, 12, 0.88);
   --edge: rgba(46, 242, 255, 0.4);
+  --cx: 50vw;
+  --cy: 63vh;
+  --r: 200px;
+  --safe-top: max(12px, env(safe-area-inset-top));
+  --safe-bottom: max(12px, env(safe-area-inset-bottom));
   position: fixed;
   inset: 0;
   z-index: 20;
   pointer-events: none;
-  font-family: "Rajdhani", var(--font);
-  color: #e8fbff;
+  font-family: "Exo 2", var(--font);
+  color: #f2fbff;
 }
 
 .nav [hidden] {
@@ -571,31 +576,42 @@ body.driving .maplibregl-ctrl-bottom-left {
   font-family: inherit;
 }
 
+/* Slanted panels: a parallelogram cut, the text stays the font's own italic. */
+.hud-turn,
+.hud-hazard__main,
+.hud-hazard__more li,
+.hud-hazard__empty,
+.hud-trip,
+.nav-btn {
+  clip-path: polygon(0 0, 100% 0, calc(100% - var(--slant, 16px)) 100%, 0 100%);
+}
+
 .nav-kicker {
   margin: 0;
   color: var(--neon);
   font-size: 12px;
-  font-weight: 700;
+  font-style: italic;
+  font-weight: 800;
   letter-spacing: 0.25em;
   text-transform: uppercase;
 }
 
 .nav-btn {
-  padding: 10px 18px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #e8fbff;
-  font-size: 16px;
-  font-weight: 700;
+  --slant: 12px;
+  padding: 10px 24px 10px 16px;
+  border: 0;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f2fbff;
+  font-size: 15px;
+  font-style: italic;
+  font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
-  clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
 }
 
 .nav-btn:hover:not(:disabled) {
-  border-color: var(--neon);
+  background: rgba(46, 242, 255, 0.2);
 }
 
 .nav-btn:disabled {
@@ -604,7 +620,6 @@ body.driving .maplibregl-ctrl-bottom-left {
 }
 
 .nav-btn--go {
-  border-color: var(--neon);
   background: var(--neon);
   color: #001418;
 }
@@ -618,15 +633,14 @@ body.driving .maplibregl-ctrl-bottom-left {
 .nav-sheet {
   position: absolute;
   left: 50%;
-  bottom: max(16px, env(safe-area-inset-bottom));
+  bottom: var(--safe-bottom);
   transform: translateX(-50%);
   width: min(480px, calc(100vw - 24px));
   padding: 18px 20px 16px;
-  border: 1px solid var(--edge);
+  border-left: 5px solid var(--neon);
   background: var(--glass);
-  box-shadow: 0 0 40px rgba(46, 242, 255, 0.15);
   pointer-events: auto;
-  clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+  clip-path: polygon(0 0, 100% 0, calc(100% - 22px) 100%, 0 100%);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
@@ -634,7 +648,8 @@ body.driving .maplibregl-ctrl-bottom-left {
 .nav-sheet__dest {
   margin: 2px 0 6px;
   font-size: 26px;
-  font-weight: 700;
+  font-style: italic;
+  font-weight: 800;
   line-height: 1.1;
 }
 
@@ -642,14 +657,15 @@ body.driving .maplibregl-ctrl-bottom-left {
   margin: 0;
   color: var(--neon);
   font-size: 22px;
-  font-weight: 700;
+  font-style: italic;
+  font-weight: 800;
 }
 
 .nav-sheet__extras,
 .nav-sheet__note {
   margin: 4px 0 0;
   color: #9fc3ca;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -665,8 +681,9 @@ body.driving .maplibregl-ctrl-bottom-left {
 .nav-sheet__actions {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   margin-top: 14px;
+  padding-right: 14px;
 }
 
 .nav[data-state="locating"] .nav-sheet__actions .nav-btn:not([data-act="cancel"]),
@@ -678,8 +695,8 @@ body.driving .maplibregl-ctrl-bottom-left {
 /* Car and finish flag */
 
 .nav-car {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   filter: drop-shadow(0 0 6px #2ef2ff) drop-shadow(0 0 14px rgba(46, 242, 255, 0.6));
 }
 
@@ -690,69 +707,128 @@ body.driving .maplibregl-ctrl-bottom-left {
   filter: drop-shadow(0 0 6px rgba(255, 61, 242, 0.9));
 }
 
-/* HUD: next turn */
+/* Radar: darkened edges and a ring around the car, with N pointing north */
+
+.hud::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    circle at var(--cx) var(--cy),
+    transparent calc(var(--r) * 1.02),
+    rgba(0, 0, 0, 0.45) calc(var(--r) * 1.5),
+    rgba(0, 0, 0, 0.75) calc(var(--r) * 3)
+  );
+}
+
+.hud-radar {
+  position: absolute;
+  left: var(--cx);
+  top: var(--cy);
+  width: calc(var(--r) * 2);
+  height: calc(var(--r) * 2);
+  transform: translate(-50%, -50%);
+}
+
+.hud-radar svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.hud-radar__ring {
+  fill: none;
+  stroke: rgba(46, 242, 255, 0.5);
+  stroke-width: 1.5;
+}
+
+.hud-radar__ticks {
+  fill: none;
+  stroke: rgba(46, 242, 255, 0.35);
+  stroke-width: 4;
+  stroke-dasharray: 1 14;
+}
+
+.hud-radar__north path {
+  fill: var(--pink);
+}
+
+.hud-radar__north text {
+  fill: #fff;
+  font: italic 900 13px "Exo 2", sans-serif;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.nav.is-free .hud::before,
+.nav.is-free .hud-radar {
+  display: none;
+}
+
+/* Next turn: arrow and distance, nothing else */
 
 .hud-turn {
   position: absolute;
-  top: max(12px, env(safe-area-inset-top));
+  top: var(--safe-top);
   left: 12px;
   display: flex;
   align-items: center;
-  gap: 14px;
-  width: min(460px, calc(100vw - 24px));
-  padding: 12px 18px 12px 12px;
-  border-left: 4px solid var(--neon);
+  gap: 10px;
+  padding: 8px 30px 8px 12px;
+  border-left: 5px solid var(--neon);
   background: var(--glass);
-  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 18px), calc(100% - 18px) 100%, 0 100%);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
 }
 
 .hud-turn__icon {
   flex: none;
-  width: 70px;
-  height: 70px;
+  width: 56px;
+  height: 56px;
   color: var(--neon);
   filter: drop-shadow(0 0 8px rgba(46, 242, 255, 0.8));
 }
 
-.hud-turn__icon svg,
-.hud-then i svg {
+.hud-turn__icon svg {
   display: block;
   width: 100%;
   height: 100%;
 }
 
-.hud-turn__body {
-  min-width: 0;
+.hud-turn__dist,
+.hud-hazard__dist {
+  white-space: nowrap;
 }
 
-.hud-turn__dist {
-  font-size: 44px;
-  font-weight: 700;
-  line-height: 0.95;
-  letter-spacing: 0.02em;
+.hud-turn__dist b {
+  font-size: 40px;
+  font-style: italic;
+  font-weight: 900;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
-.hud-turn__text {
-  display: -webkit-box;
-  margin-top: 4px;
-  overflow: hidden;
-  color: #bfe9f0;
-  font-size: 18px;
-  font-weight: 600;
-  line-height: 1.15;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+.hud-turn__dist small,
+.hud-hazard__dist small {
+  margin-left: 3px;
+  font-style: italic;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.hud-turn__dist small {
+  color: var(--neon);
+  font-size: 17px;
 }
 
 .hud-turn.is-now {
   border-left-color: var(--pink);
 }
 
-.hud-turn.is-now .hud-turn__icon {
+.hud-turn.is-now .hud-turn__icon,
+.hud-turn.is-now .hud-turn__dist small {
   color: var(--pink);
+}
+
+.hud-turn.is-now .hud-turn__icon {
   filter: drop-shadow(0 0 10px rgba(255, 61, 242, 0.9));
 }
 
@@ -766,143 +842,162 @@ body.driving .maplibregl-ctrl-bottom-left {
   }
 }
 
-.hud-then {
+/* Lights and signs: the stars of the HUD */
+
+.hud-hazard {
   position: absolute;
-  top: calc(max(12px, env(safe-area-inset-top)) + 100px);
-  left: 12px;
+  top: var(--safe-top);
+  left: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  width: min(420px, calc(100vw - 24px));
+  transform: translateX(-50%);
+}
+
+.hud-hazard__main {
+  --c: #fff;
+  --slant: 24px;
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 12px 4px 10px;
-  border-left: 4px solid var(--neon);
-  background: var(--glass);
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.15em;
+  gap: 16px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px 40px 18px 16px;
+  border-left: 7px solid var(--c);
+  background: linear-gradient(100deg, color-mix(in srgb, var(--c) 24%, rgba(3, 8, 12, 0.9)), rgba(3, 8, 12, 0.9) 60%);
+}
+
+.hud-hazard__icon {
+  flex: none;
+  width: 84px;
+  height: 84px;
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--c) 70%, transparent));
+}
+
+.hud-hazard__body {
+  min-width: 0;
+}
+
+.hud-hazard__dist b {
+  font-size: 66px;
+  font-style: italic;
+  font-weight: 900;
+  line-height: 0.9;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-hazard__dist small {
+  color: var(--c);
+  font-size: 24px;
+}
+
+.hud-hazard__title {
+  margin-top: 6px;
+  overflow: hidden;
+  color: var(--c);
+  font-size: 15px;
+  font-style: italic;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-overflow: ellipsis;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.hud-then i {
-  width: 26px;
-  height: 26px;
-  color: var(--neon);
-}
-
-/* HUD: upcoming lights and signs */
-
-.hud-next {
+.hud-hazard__bar {
   position: absolute;
-  top: calc(max(12px, env(safe-area-inset-top)) + 140px);
-  left: 12px;
-  width: 250px;
+  left: 16px;
+  right: 44px;
+  bottom: 7px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.12);
 }
 
-.hud-next .nav-kicker {
-  margin-bottom: 6px;
-  text-shadow: 0 0 8px rgba(46, 242, 255, 0.7);
+.hud-hazard__bar i {
+  display: block;
+  height: 100%;
+  background: var(--c);
+  box-shadow: 0 0 10px var(--c);
+  transition: width 0.15s linear;
 }
 
-.hud-next__list {
-  display: grid;
-  gap: 6px;
+.hud-hazard__main.is-new {
+  animation: hazard-in 0.35s ease-out;
+}
+
+.hud-hazard__main.is-close {
+  animation: hazard-flash 0.4s ease-in-out infinite alternate;
+}
+
+@keyframes hazard-in {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(1.05);
+  }
+}
+
+@keyframes hazard-flash {
+  to {
+    background: linear-gradient(100deg, color-mix(in srgb, var(--c) 55%, rgba(3, 8, 12, 0.9)), rgba(3, 8, 12, 0.9) 75%);
+  }
+}
+
+.hud-hazard__more {
+  display: flex;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.hud-item {
-  position: relative;
-  display: grid;
-  grid-template-columns: 34px 1fr auto;
+.hud-hazard__more li {
+  --c: #fff;
+  --slant: 12px;
+  display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 10px 10px 8px;
-  border-left: 3px solid rgba(46, 242, 255, 0.5);
+  gap: 8px;
+  padding: 5px 22px 5px 8px;
+  border-left: 4px solid var(--c);
   background: var(--glass);
-  clip-path: polygon(0 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%);
 }
 
-.hud-item img {
-  width: 34px;
-  height: 34px;
+.hud-hazard__more img {
+  width: 40px;
+  height: 40px;
 }
 
-.hud-item__title {
-  overflow: hidden;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.hud-item__dist {
+.hud-hazard__more b {
   font-size: 22px;
-  font-weight: 700;
+  font-style: italic;
+  font-weight: 900;
   font-variant-numeric: tabular-nums;
 }
 
-.hud-item__bar {
-  position: absolute;
-  left: 8px;
-  right: 14px;
-  bottom: 4px;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.hud-item__bar i {
-  display: block;
-  height: 100%;
-  background: var(--neon);
-  box-shadow: 0 0 6px var(--neon);
-  transition: width 0.15s linear;
-}
-
-.hud-item:first-child {
-  border-left-color: var(--neon);
-}
-
-.hud-item.is-close {
-  border-left-color: var(--warn);
-  animation: hud-pulse 0.8s ease-in-out infinite alternate;
-}
-
-.hud-item.is-close .hud-item__bar i {
-  background: var(--warn);
-  box-shadow: 0 0 6px var(--warn);
-}
-
-.hud-item.is-close .hud-item__dist {
-  color: var(--warn);
-}
-
-@keyframes hud-pulse {
-  to {
-    background: rgba(60, 40, 0, 0.88);
-  }
-}
-
-.hud-next__empty {
+.hud-hazard__empty {
   margin: 0;
-  padding: 8px 10px;
-  border-left: 3px solid rgba(255, 255, 255, 0.2);
+  padding: 10px 34px 10px 16px;
+  border-left: 5px solid rgba(255, 255, 255, 0.3);
   background: var(--glass);
-  color: #8fb3ba;
+  color: #9fc3ca;
   font-size: 15px;
-  font-weight: 600;
+  font-style: italic;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
-.hud-next__empty:empty {
+.hud-hazard__empty:empty {
   display: none;
 }
 
-/* HUD: speedometer */
+/* Speedometer */
 
 .hud-speed {
   position: absolute;
   right: 12px;
-  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 26px); /* clear of the map attribution */
+  bottom: calc(var(--safe-bottom) + 26px); /* clear of the map attribution */
   display: flex;
   align-items: flex-end;
   gap: 10px;
@@ -911,15 +1006,15 @@ body.driving .maplibregl-ctrl-bottom-left {
 .hud-limit {
   display: grid;
   place-items: center;
-  width: 62px;
-  height: 62px;
-  margin-bottom: 8px;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 10px;
   border: 7px solid var(--danger);
   border-radius: 50%;
   background: #fff;
   color: #111;
   font-size: 26px;
-  font-weight: 700;
+  font-weight: 900;
   box-shadow: 0 0 0 2px #fff, 0 4px 18px rgba(0, 0, 0, 0.6);
 }
 
@@ -929,17 +1024,17 @@ body.driving .maplibregl-ctrl-bottom-left {
 
 @keyframes hud-limit {
   to {
-    transform: scale(1.1);
-    box-shadow: 0 0 0 2px #fff, 0 0 24px var(--danger);
+    transform: scale(1.12);
+    box-shadow: 0 0 0 2px #fff, 0 0 26px var(--danger);
   }
 }
 
 .hud-gauge {
   position: relative;
-  width: 150px;
-  height: 150px;
+  width: 170px;
+  height: 170px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(4, 12, 16, 0.92) 58%, rgba(4, 12, 16, 0.5) 72%, transparent 73%);
+  background: radial-gradient(circle, rgba(3, 8, 12, 0.94) 60%, rgba(3, 8, 12, 0.45) 72%, transparent 73%);
 }
 
 .hud-gauge svg {
@@ -952,37 +1047,37 @@ body.driving .maplibregl-ctrl-bottom-left {
   fill: none;
 }
 
-.hud-gauge__ticks {
-  stroke: rgba(255, 255, 255, 0.35);
-  stroke-width: 5;
-  stroke-dasharray: 0.5 4.5;
-}
-
 .hud-gauge__track {
-  stroke: rgba(46, 242, 255, 0.12);
-  stroke-width: 8;
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 11;
 }
 
 .hud-gauge__value {
-  stroke: var(--neon);
-  stroke-width: 8;
+  stroke-width: 11;
   stroke-dasharray: 0 100;
-  filter: drop-shadow(0 0 5px var(--neon));
+  filter: drop-shadow(0 0 6px rgba(255, 61, 242, 0.55));
   transition: stroke-dasharray 0.15s linear;
+}
+
+/* Thin dark cuts turn the arc into segments. */
+.hud-gauge__cuts {
+  stroke: #03080c;
+  stroke-width: 13;
+  stroke-dasharray: 0.7 2.63;
 }
 
 .hud-gauge.is-over .hud-gauge__value {
   stroke: var(--danger);
-  filter: drop-shadow(0 0 6px var(--danger));
 }
 
 .hud-gauge__num {
   position: absolute;
-  top: 38px;
+  top: 44px;
   left: 0;
   right: 0;
-  font-size: 54px;
-  font-weight: 700;
+  font-size: 68px;
+  font-style: italic;
+  font-weight: 900;
   line-height: 1;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -994,33 +1089,31 @@ body.driving .maplibregl-ctrl-bottom-left {
 
 .hud-gauge__unit {
   position: absolute;
-  top: 92px;
+  top: 114px;
   left: 0;
   right: 0;
   color: var(--neon);
   font-size: 14px;
-  font-weight: 700;
+  font-style: italic;
+  font-weight: 800;
   letter-spacing: 0.2em;
   text-align: center;
   text-transform: uppercase;
 }
 
-/* HUD: trip bar */
+/* Trip bar */
 
 .hud-trip {
   position: absolute;
   left: 12px;
-  bottom: max(12px, env(safe-area-inset-bottom));
+  bottom: var(--safe-bottom);
   display: flex;
   align-items: center;
   gap: 18px;
-  max-width: calc(100vw - 260px);
-  padding: 10px 12px 10px 16px;
-  border-left: 4px solid var(--neon);
+  max-width: calc(100vw - 290px);
+  padding: 10px 34px 10px 16px;
+  border-left: 5px solid var(--neon);
   background: var(--glass);
-  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
 }
 
 .hud-trip__stat {
@@ -1031,7 +1124,8 @@ body.driving .maplibregl-ctrl-bottom-left {
 
 .hud-trip__stat b {
   font-size: 24px;
-  font-weight: 700;
+  font-style: italic;
+  font-weight: 900;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -1039,8 +1133,9 @@ body.driving .maplibregl-ctrl-bottom-left {
 .hud-trip__stat small {
   color: #7fb0b8;
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.18em;
+  font-style: italic;
+  font-weight: 800;
+  letter-spacing: 0.15em;
   text-transform: uppercase;
 }
 
@@ -1068,8 +1163,9 @@ body.driving .maplibregl-ctrl-bottom-left {
 }
 
 .hud-btn--text {
-  font-size: 17px;
-  font-weight: 700;
+  font-size: 16px;
+  font-style: italic;
+  font-weight: 900;
 }
 
 .hud-btn--exit {
@@ -1088,24 +1184,21 @@ body.driving .maplibregl-ctrl-bottom-left {
 .hud-recenter {
   position: absolute;
   left: 50%;
-  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 80px);
+  bottom: calc(var(--safe-bottom) + 90px);
   transform: translateX(-50%);
-  border-color: var(--neon);
-  background: var(--glass);
-  color: var(--neon);
 }
 
 .hud-toast {
   position: absolute;
-  top: calc(max(12px, env(safe-area-inset-top)) + 100px);
+  top: calc(var(--safe-top) + 170px);
   right: 12px;
   padding: 8px 14px;
   border-left: 4px solid var(--warn);
   background: var(--glass);
   color: var(--warn);
   font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  font-style: italic;
+  font-weight: 800;
 }
 
 /* Finish screen */
@@ -1135,10 +1228,11 @@ body.driving .maplibregl-ctrl-bottom-left {
 .nav-finish__title {
   margin: 6px 0 28px;
   color: #fff;
-  font-size: clamp(38px, 9vw, 76px);
-  font-weight: 700;
+  font-size: clamp(36px, 8.5vw, 76px);
+  font-style: italic;
+  font-weight: 900;
   line-height: 1;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   text-shadow: 0 0 12px var(--neon), 0 0 40px rgba(46, 242, 255, 0.6);
 }
@@ -1149,121 +1243,143 @@ body.driving .maplibregl-ctrl-bottom-left {
   gap: 8px 24px;
   width: min(380px, 100%);
   margin: 0 auto 28px;
-  font-size: 18px;
+  font-size: 17px;
   text-align: left;
 }
 
 .nav-finish__stats dt {
   color: #8fb3ba;
+  font-style: italic;
   font-weight: 600;
 }
 
 .nav-finish__stats dd {
   margin: 0;
   color: var(--neon);
-  font-weight: 700;
+  font-style: italic;
+  font-weight: 900;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-/* Phones */
+/* Medium screens: the sign card moves right so it clears the turn panel. */
+
+@media (max-width: 900px) {
+  .hud-hazard {
+    left: auto;
+    right: 12px;
+    justify-items: end;
+    width: min(420px, calc(100vw - 250px));
+    transform: none;
+  }
+}
+
+/* Phones: signs across the top, turn and speed at the bottom above the trip bar. */
 
 @media (max-width: 600px) {
   .nav-sheet__actions .nav-btn {
     flex: 1 1 0;
     min-width: 0;
-    padding: 10px 6px;
-    font-size: 15px;
-    letter-spacing: 0.04em;
+    padding: 10px 14px 10px 8px;
+    font-size: 14px;
+    letter-spacing: 0.03em;
   }
 
-  .hud-turn__icon {
-    width: 56px;
-    height: 56px;
+  .hud-hazard {
+    left: 12px;
+    right: 12px;
+    justify-items: stretch;
+    width: auto;
   }
 
-  .hud-turn__dist {
-    font-size: 36px;
+  .hud-hazard__main {
+    gap: 12px;
+    padding: 10px 34px 16px 12px;
   }
 
-  .hud-turn__text {
-    font-size: 16px;
+  .hud-hazard__icon {
+    width: 62px;
+    height: 62px;
   }
 
-  .hud-then {
-    top: calc(max(12px, env(safe-area-inset-top)) + 90px);
+  .hud-hazard__dist b {
+    font-size: 50px;
   }
 
-  .hud-next {
-    top: calc(max(12px, env(safe-area-inset-top)) + 128px);
-    width: 190px;
+  .hud-hazard__dist small {
+    font-size: 20px;
   }
 
-  .hud-item {
-    grid-template-columns: 28px 1fr auto;
-    gap: 7px;
-  }
-
-  .hud-item img {
-    width: 28px;
-    height: 28px;
-  }
-
-  .hud-item__title {
+  .hud-hazard__title {
     font-size: 13px;
   }
 
-  .hud-item__dist {
-    font-size: 18px;
+  .hud-hazard__more img {
+    width: 32px;
+    height: 32px;
+  }
+
+  .hud-hazard__more b {
+    font-size: 19px;
+  }
+
+  .hud-turn {
+    top: auto;
+    bottom: calc(var(--safe-bottom) + 92px);
+    padding: 6px 26px 6px 10px;
+  }
+
+  .hud-turn__icon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .hud-turn__dist b {
+    font-size: 32px;
+  }
+
+  /* Limit sign above the gauge, so it doesn't crowd the turn panel. */
+  .hud-speed {
+    bottom: calc(var(--safe-bottom) + 84px);
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
   }
 
   .hud-gauge {
-    width: 118px;
-    height: 118px;
+    width: 124px;
+    height: 124px;
   }
 
   .hud-gauge__num {
-    top: 28px;
-    font-size: 42px;
+    top: 31px;
+    font-size: 48px;
   }
 
   .hud-gauge__unit {
-    top: 70px;
+    top: 80px;
     font-size: 12px;
   }
 
   .hud-limit {
-    width: 50px;
-    height: 50px;
+    width: 52px;
+    height: 52px;
+    margin-bottom: 6px;
     border-width: 6px;
     font-size: 21px;
   }
 
-  /* Speed goes top-right under the turn card, so nothing at the bottom covers the car. */
-  .hud-speed {
-    top: calc(max(12px, env(safe-area-inset-top)) + 96px);
-    bottom: auto;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .hud-limit {
-    order: 1;
-    margin: 0;
-  }
-
   .hud-trip {
-    bottom: calc(max(12px, env(safe-area-inset-bottom)) + 26px);
+    bottom: calc(var(--safe-bottom) + 24px);
     right: 12px;
-    max-width: none;
     justify-content: space-between;
     gap: 10px;
-    padding: 8px 10px 8px 12px;
+    max-width: none;
+    padding: 8px 26px 8px 12px;
   }
 
-  .hud-trip__controls {
-    gap: 4px;
+  .hud-trip__stat b {
+    font-size: 19px;
   }
 
   .hud-trip__stat small {
@@ -1271,12 +1387,16 @@ body.driving .maplibregl-ctrl-bottom-left {
     letter-spacing: 0.05em;
   }
 
+  .hud-trip__controls {
+    gap: 4px;
+  }
+
   .hud-btn {
     width: 34px;
     height: 34px;
   }
 
-  .hud-trip__stat b {
-    font-size: 19px;
+  .hud-toast {
+    top: calc(var(--safe-top) + 160px);
   }
 }

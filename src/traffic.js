@@ -742,5 +742,9 @@ export function setupTraffic(map) {
       paused = value;
       if (!paused) update();
     },
+    // The driving view draws only what's on the route, bigger.
+    setVisible(visible) {
+      if (map.getLayer(TRAFFIC_LAYER)) map.setLayoutProperty(TRAFFIC_LAYER, 'visibility', visible ? 'visible' : 'none');
+    },
   };
 }

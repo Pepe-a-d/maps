@@ -52,6 +52,20 @@ export function addSatellite(style) {
 
 export function setupBasemapSwitch(map) {
   let mode = savedMode();
+  let forced = null; // driving mode always shows the black map
+
+  // The base style's covering layers, captured before the app adds its own
+  // (route lines are lines too, and must stay visible).
+  let covering = [];
+  map.once('load', () => {
+    covering = map.getStyle().layers.filter(coversImagery).map((layer) => layer.id);
+  });
+
+  function apply() {
+    const satellite = (forced ?? mode) === 'satellite';
+    map.setLayoutProperty(LAYER, 'visibility', satellite ? 'visible' : 'none');
+    for (const id of covering) map.setLayoutProperty(id, 'visibility', satellite ? 'none' : 'visible');
+  }
 
   const button = document.createElement('button');
   button.type = 'button';
@@ -79,11 +93,7 @@ export function setupBasemapSwitch(map) {
 
   button.addEventListener('click', () => {
     mode = mode === 'satellite' ? 'map' : 'satellite';
-    const satellite = mode === 'satellite';
-    map.setLayoutProperty(LAYER, 'visibility', satellite ? 'visible' : 'none');
-    for (const layer of map.getStyle().layers) {
-      if (coversImagery(layer)) map.setLayoutProperty(layer.id, 'visibility', satellite ? 'none' : 'visible');
-    }
+    apply();
     try {
       localStorage.setItem(STORAGE_KEY, mode);
     } catch {
@@ -94,4 +104,12 @@ export function setupBasemapSwitch(map) {
 
   map.on('moveend', updateThumbnail);
   render();
+
+  return {
+    // 'map' or 'satellite' overrides the viewer's choice; null hands it back.
+    force(next) {
+      forced = next;
+      if (map.getLayer(LAYER)) apply();
+    },
+  };
 }
