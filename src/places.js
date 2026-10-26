@@ -1,4 +1,5 @@
 import * as maplibregl from 'maplibre-gl';
+import { notify } from './notify.js';
 
 // Saved places, drawn like locations on a video game map: a floating hexagon
 // with the place's glyph, its name underneath, and a "new location" banner
@@ -77,7 +78,7 @@ export function setupPlaces(map, { onGo }) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(places));
     } catch {
-      showBanner('No se pudo guardar', 'El navegador no deja guardar datos');
+      notify({ kicker: 'No se pudo guardar', title: 'El navegador no deja guardar datos' });
     }
     listeners.forEach((fn) => fn());
   }
@@ -180,7 +181,8 @@ export function setupPlaces(map, { onGo }) {
       places.push(place);
       persist();
       addMarker(place, true);
-      showBanner('Ubicación descubierta', name, typeOf(type));
+      const placeType = typeOf(type);
+      notify({ kicker: 'Ubicación descubierta', title: name, color: placeType.color, icon: placeGlyph(placeType.id) });
     }
     closeDialog();
   });
@@ -194,26 +196,6 @@ export function setupPlaces(map, { onGo }) {
       closeDialog();
     }
   });
-
-  // ---------- "New location" banner ----------
-
-  const banner = document.createElement('div');
-  banner.className = 'discover';
-  banner.setAttribute('role', 'status');
-  document.body.append(banner);
-  let bannerTimer;
-
-  function showBanner(kicker, title, type) {
-    banner.innerHTML = `${type ? `<span class="discover__badge" style="--c: ${type.color}">${placeGlyph(type.id)}</span>` : ''}
-      <span class="discover__text"><small></small><b></b></span>`;
-    banner.querySelector('small').textContent = kicker;
-    banner.querySelector('b').textContent = title;
-    banner.classList.remove('is-shown');
-    void banner.offsetWidth; // restart the animation
-    banner.classList.add('is-shown');
-    clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(() => banner.classList.remove('is-shown'), 3200);
-  }
 
   return {
     all: () => [...places].sort((a, b) => b.created - a.created),

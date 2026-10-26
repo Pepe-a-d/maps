@@ -1,10 +1,11 @@
-// App settings, kept in this browser. Everything optional starts hidden.
+// App settings, kept in this browser. Optional readouts start hidden.
 
 const STORAGE_KEY = 'maps-settings';
 
 const DEFAULTS = {
   mapStyle: 'map', // 'map' | 'satellite'
   trafficIcons: false, // lights and signs on the map while browsing
+  exploreMap: true, // sectors and discovered roads
   routeMode: 'fastest', // 'fastest' | 'no-lights' | 'fast' | 'slow'
   hudMoreSigns: false, // the two signs after the next one
   hudTrip: false, // arrival time, time and distance left

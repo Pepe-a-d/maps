@@ -1,10 +1,11 @@
+import { formatPercent } from './explore.js';
 import { ROUTE_MODES } from './routing.js';
 import { settings } from './settings.js';
 import { iconDataUrl } from './traffic.js';
 import { placeGlyph } from './places.js';
 
-// The settings panel: route preference, map look, what the driving screen
-// shows, and your saved places.
+// The settings panel: route preference, map look, exploration progress, what
+// the driving screen shows, and your saved places.
 
 const CLOSE_ICON =
   '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
@@ -16,7 +17,7 @@ const toggle = (key, label) => `
     <i aria-hidden="true"></i>
   </label>`;
 
-export function setupSettingsPanel({ traffic, places, onGo }) {
+export function setupSettingsPanel({ traffic, places, explorer, onGo }) {
   const root = document.createElement('div');
   root.className = 'settings';
   root.hidden = true;
@@ -45,6 +46,12 @@ export function setupSettingsPanel({ traffic, places, onGo }) {
       </section>
 
       <section>
+        <h3>Exploración · A Coruña</h3>
+        ${toggle('exploreMap', 'Sectores y carreteras descubiertas')}
+        <ul class="settings__sectors"></ul>
+      </section>
+
+      <section>
         <h3>Pantalla de conducción</h3>
         ${toggle('hudMoreSigns', 'Siguientes señales')}
         ${toggle('hudTrip', 'Llegada, tiempo y distancia')}
@@ -59,6 +66,7 @@ export function setupSettingsPanel({ traffic, places, onGo }) {
   document.body.append(root);
 
   const cats = root.querySelector('.settings__cats');
+  const sectorList = root.querySelector('.settings__sectors');
   const placeList = root.querySelector('.settings__places');
 
   // ---------- Rendering ----------
@@ -71,7 +79,39 @@ export function setupSettingsPanel({ traffic, places, onGo }) {
     for (const input of root.querySelectorAll('input[data-setting]')) input.checked = settings.get(input.dataset.setting);
     cats.hidden = !settings.get('trafficIcons');
     renderCategories();
+    renderSectors();
     renderPlaces();
+  }
+
+  function renderSectors() {
+    const progress = explorer.progress();
+    if (!progress) {
+      // The road data loads on demand; draw the list once it's here.
+      sectorList.innerHTML = '<li class="settings__empty">Cargando sectores…</li>';
+      explorer.load();
+      return;
+    }
+    sectorList.replaceChildren(
+      ...progress.map((sector) => {
+        const li = document.createElement('li');
+        li.innerHTML = `
+          <button type="button" class="settings__sector" title="Ver en el mapa">
+            <span class="settings__sector-name"></span>
+            <b></b>
+            <i class="settings__sector-bar"><i></i></i>
+            <small></small>
+          </button>`;
+        li.querySelector('.settings__sector-name').textContent = sector.name;
+        li.querySelector('b').textContent = formatPercent(sector.percent);
+        li.querySelector('.settings__sector-bar i').style.width = `${Math.min(100, sector.percent)}%`;
+        li.querySelector('small').textContent = `${sector.streets} / ${sector.totalStreets} calles`;
+        li.querySelector('button').addEventListener('click', () => {
+          close();
+          explorer.show(sector.id);
+        });
+        return li;
+      }),
+    );
   }
 
   function renderCategories() {
@@ -151,6 +191,9 @@ export function setupSettingsPanel({ traffic, places, onGo }) {
   });
   places.onChange(() => {
     if (!root.hidden) renderPlaces();
+  });
+  explorer.onChange(() => {
+    if (!root.hidden) renderSectors();
   });
 
   function open() {

@@ -81,7 +81,7 @@ function currentPosition() {
   });
 }
 
-export function setupDriving(map, traffic, basemap) {
+export function setupDriving(map, traffic, basemap, explorer) {
   // off | locating | pick-origin | routing | preview | driving | finished
   let mode = 'off';
   let route = null;
@@ -288,8 +288,11 @@ export function setupDriving(map, traffic, basemap) {
     ui.root.dataset.state = next;
     document.body.classList.toggle('nav-on', next !== 'off');
     document.body.classList.toggle('driving', driving);
-    // On the road: black map only.
-    if (driving !== wasDriving) basemap.force(driving ? 'map' : null);
+    // On the road: black map only, and of the exploration just the lit-up roads.
+    if (driving !== wasDriving) {
+      basemap.force(driving ? 'map' : null);
+      explorer.setDriving(driving);
+    }
   }
 
   // Optional bits of the HUD, off unless switched on in the settings.
@@ -645,6 +648,7 @@ export function setupDriving(map, traffic, basemap) {
   function onFix(pos) {
     if (!route) return;
     const p = [pos.coords.longitude, pos.coords.latitude];
+    explorer.visit(p, pos.coords.accuracy); // real driving discovers roads; the simulator doesn't
     const now = performance.now();
     const { line } = route;
     const seg = line.segmentAt(gps.along);

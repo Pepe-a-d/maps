@@ -870,6 +870,125 @@ body.nav-on .maplibregl-ctrl-group {
   font-weight: 500;
 }
 
+.settings__sectors {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings__sector {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 6px 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--tint);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings__sector:hover {
+  background: var(--tint-2);
+}
+
+.settings__sector-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.settings__sector b {
+  color: var(--pink);
+  font-size: 16px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings__sector-bar,
+.sector-card__bar {
+  display: block;
+  grid-column: 1 / -1;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--tint-2);
+}
+
+.settings__sector-bar i,
+.sector-card__bar i {
+  display: block;
+  height: 100%;
+  background: var(--pink);
+}
+
+.settings__sector small {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ---------- Exploration: sector card ---------- */
+
+.sector-card {
+  display: grid;
+  gap: 4px;
+  min-width: 210px;
+  padding: 0 14px 0 4px;
+}
+
+.sector-card__kicker {
+  color: var(--pink);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.sector-card strong {
+  font-size: 20px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.sector-card__percent {
+  font-size: 44px;
+  font-weight: 900;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.sector-card__bar {
+  margin: 4px 0 6px;
+}
+
+.sector-card dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.sector-card dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.sector-card dd {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Saved places: map locations ---------- */
 
 /* MapLibre positions the marker with a transform on .place itself,
@@ -1000,6 +1119,11 @@ body.nav-on .maplibregl-ctrl-group {
 
 .discover.is-shown {
   animation: discover 3.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* While driving, below the sign card. */
+body.driving .discover {
+  top: calc(var(--safe-top) + 132px);
 }
 
 @keyframes discover {

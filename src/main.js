@@ -5,6 +5,7 @@ import './style.css';
 import { setupTraffic, TRAFFIC_LAYER } from './traffic.js';
 import { addSatellite, setupBasemap } from './basemap.js';
 import { setupDriving } from './drive.js';
+import { setupExplorer } from './explore.js';
 import { setupSettingsPanel } from './panel.js';
 import { placeGlyph, setupPlaces } from './places.js';
 import { showSplash } from './splash.js';
@@ -110,13 +111,18 @@ mapReady.then(() => map.getContainer().querySelector('.maplibregl-ctrl-attrib')?
 
 const traffic = setupTraffic(map);
 const basemap = setupBasemap(map);
-const drive = setupDriving(map, traffic, basemap);
+const explorer = setupExplorer(map);
+const drive = setupDriving(map, traffic, basemap, explorer);
 const goTo = (place) => {
   pin.remove(); // a pin left from before would only get in the way
   drive.planTo([place.lng, place.lat], place.name);
 };
 const places = setupPlaces(map, { onGo: goTo });
-const settingsPanel = setupSettingsPanel({ traffic, places, onGo: goTo });
+const settingsPanel = setupSettingsPanel({ traffic, places, explorer, onGo: goTo });
+
+// Where you are, as the locate button tracks you, discovers the roads you drive.
+geolocate.on('geolocate', (pos) => explorer.visit([pos.coords.longitude, pos.coords.latitude], pos.coords.accuracy));
+if (import.meta.env.DEV) window.explorer = explorer; // to feed it test positions from the console
 document.getElementById('settings-button').addEventListener('click', () => settingsPanel.open());
 
 // ---------- Pin ----------
@@ -165,8 +171,9 @@ function dropPin(lngLat, title) {
 
 map.on('click', (e) => {
   if (drive.handleClick(e.lngLat)) return;
-  // A click on a traffic light, sign, etc. opens that icon's popup instead.
+  // A click on a traffic light, sign, etc. or a sector's name opens its own card instead.
   if (map.getLayer(TRAFFIC_LAYER) && map.queryRenderedFeatures(e.point, { layers: [TRAFFIC_LAYER] }).length) return;
+  if (explorer.labelAt(e.point)) return;
   dropPin(e.lngLat);
 });
 
