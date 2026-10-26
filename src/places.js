@@ -1,6 +1,6 @@
 import * as maplibregl from 'maplibre-gl';
 
-// Saved places, drawn like locations on a video game map: a floating diamond
+// Saved places, drawn like locations on a video game map: a floating hexagon
 // with the place's glyph, its name underneath, and a "new location" banner
 // when you save one. Tapping one plans the route there. Stored in this browser only.
 
@@ -180,7 +180,7 @@ export function setupPlaces(map, { onGo }) {
       places.push(place);
       persist();
       addMarker(place, true);
-      showBanner('Nueva ubicación', name, typeOf(type));
+      showBanner('Ubicación descubierta', name, typeOf(type));
     }
     closeDialog();
   });

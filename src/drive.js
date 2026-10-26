@@ -16,21 +16,24 @@ import {
 import { settings } from './settings.js';
 import { iconDataUrl } from './traffic.js';
 
-// Driving mode laid out like a modern bike TFT dashboard: tiles for the next
-// turn, the next sign (the star of the show) and speed with a segmented bar,
-// and the map in a window that turns with the bike. Clock and lamps, the signs
-// after the next one and trip data are optional (settings). A simulator drives
-// the route from a desk.
+// Driving mode in the style of a racing game HUD: the map fills the screen like
+// the game world, turning with you, and the HUD floats on top — the next sign
+// as a big notification card (the star of the show), the next turn, and a round
+// speedometer with the speed limit. Clock and lamps, the signs after the next
+// one and trip data are optional (settings). A simulator drives the route from a desk.
 
-const ACCENT = '#4c8dff';
+const ROUTE_COLOR = '#ff2d8a';
 const SIM_SPEEDS = [1, 2, 4];
 const GAUGE_MAX_KMH = 160;
-const REV_SEGMENTS = 24;
 const ARRIVE_M = 15;
 const OFF_ROUTE_M = 30;
 const ITEMS_AHEAD_M = 2000; // how far ahead the map shows lights and signs
 const RADAR_LAMP_M = 300;
-const CAR_Y = 0.7; // where the bike sits in the map window, from the top
+const CAR_Y = 0.64; // where you sit on screen, from the top
+
+// The speedometer's arc (270°, open at the bottom) and the ring of ticks around it.
+const GAUGE_ARC = 'M26.1 93.9A48 48 0 1 1 93.9 93.9';
+const GAUGE_TICKS = 'M21.1 98.9A55 55 0 1 1 98.9 98.9';
 
 const SOURCES = { full: 'nav-full', left: 'nav-left', next: 'nav-next', items: 'nav-items' };
 
@@ -108,7 +111,6 @@ export function setupDriving(map, traffic, basemap) {
   let shownStep = -1; // what the HUD currently shows, to skip rebuilding it
   let shownItems = '';
   let shownMapItems = '';
-  let shownRev = -1;
   let stats = null;
   let wakeLock = null;
 
@@ -144,9 +146,27 @@ export function setupDriving(map, traffic, basemap) {
       </section>
 
       <section class="hud">
-        <div class="hud-window"></div>
+        <div class="hud-left">
+          <div class="hud-sign">
+            <div class="hud-sign__main" hidden>
+              <span class="hud-sign__badge"><img class="hud-sign__icon" alt="" width="72" height="72"/></span>
+              <div class="hud-sign__body">
+                <div class="hud-sign__title"></div>
+                <div class="hud-sign__dist"><b></b><small></small></div>
+              </div>
+            </div>
+            <p class="hud-sign__empty"></p>
+            <i class="hud-sign__bar"><i></i></i>
+          </div>
+          <ol class="hud-more"></ol>
+        </div>
 
-        <div class="hud-side">
+        <div class="hud-turn">
+          <div class="hud-turn__icon"></div>
+          <div class="hud-turn__dist"><b></b><small></small></div>
+        </div>
+
+        <div class="hud-right">
           <header class="hud-status">
             <b class="hud-status__clock">--:--</b>
             <span class="hud-lamps">
@@ -156,39 +176,24 @@ export function setupDriving(map, traffic, basemap) {
               <i class="lamp lamp--sim" title="Simulación">SIM</i>
             </span>
           </header>
+          <dl class="hud-trip">
+            <div><dt>Llegada</dt><dd data-f="eta">--:--</dd></div>
+            <div><dt>Restante</dt><dd data-f="time">-</dd></div>
+            <div><dt>Distancia</dt><dd data-f="dist">-</dd></div>
+          </dl>
+        </div>
 
-          <div class="tile hud-turn">
-            <div class="hud-turn__icon"></div>
-            <div class="hud-turn__dist"><b></b><small></small></div>
-          </div>
-
-          <div class="tile hud-sign">
-            <div class="hud-sign__main" hidden>
-              <img class="hud-sign__icon" alt="" width="88" height="88"/>
-              <div class="hud-sign__body">
-                <div class="hud-sign__dist"><b></b><small></small></div>
-                <div class="hud-sign__title"></div>
-              </div>
-            </div>
-            <p class="hud-sign__empty"></p>
-            <i class="hud-sign__bar"><i></i></i>
-          </div>
-
-          <ol class="hud-more"></ol>
-
-          <div class="tile hud-speed">
-            <div class="hud-rev">${Array.from({ length: REV_SEGMENTS }, (_, i) => `<i style="--t: ${i / (REV_SEGMENTS - 1)}"></i>`).join('')}</div>
-            <div class="hud-speed__row">
-              <b class="hud-speed__num">0</b>
-              <small class="hud-speed__unit">km/h</small>
-              <img class="hud-limit" alt="" width="64" height="64" hidden/>
-            </div>
-          </div>
-
-          <div class="hud-trip">
-            <div class="tile hud-stat"><span class="tile__label">Llegada</span><b data-f="eta">--:--</b></div>
-            <div class="tile hud-stat"><span class="tile__label">Restante</span><b data-f="time">-</b></div>
-            <div class="tile hud-stat"><span class="tile__label">Distancia</span><b data-f="dist">-</b></div>
+        <div class="hud-speed">
+          <img class="hud-limit" alt="" width="56" height="56" hidden/>
+          <div class="hud-gauge">
+            <svg viewBox="0 0 120 120" aria-hidden="true">
+              <path class="hud-gauge__track" d="${GAUGE_ARC}" pathLength="100"/>
+              <path class="hud-gauge__zone" d="${GAUGE_ARC}" pathLength="100"/>
+              <path class="hud-gauge__value" d="${GAUGE_ARC}" pathLength="100"/>
+              <path class="hud-gauge__ticks" d="${GAUGE_TICKS}" pathLength="100"/>
+            </svg>
+            <b class="hud-speed__num">0</b>
+            <small class="hud-speed__unit">km/h</small>
           </div>
         </div>
 
@@ -226,7 +231,6 @@ export function setupDriving(map, traffic, basemap) {
       note: $('.nav-sheet__note'),
       go: $('[data-act="go"]'),
       simBtn: $('[data-act="sim"]'),
-      window: $('.hud-window'),
       clock: $('.hud-status__clock'),
       lampGps: $('.lamp--gps'),
       lampRadar: $('.lamp--radar'),
@@ -245,7 +249,8 @@ export function setupDriving(map, traffic, basemap) {
       signEmpty: $('.hud-sign__empty'),
       more: $('.hud-more'),
       speedTile: $('.hud-speed'),
-      rev: [...root.querySelectorAll('.hud-rev i')],
+      gaugeValue: $('.hud-gauge__value'),
+      gaugeZone: $('.hud-gauge__zone'),
       speedNum: $('.hud-speed__num'),
       limit: $('.hud-limit'),
       eta: $('[data-f="eta"]'),
@@ -367,7 +372,7 @@ export function setupDriving(map, traffic, basemap) {
     const catColor = ['match', ['get', 'cat'], ...Object.entries(CAT_COLOR).flat(), '#ffffff'];
     const routeLayers = [
       { id: 'nav-done', source: SOURCES.full, type: 'line', layout: round, paint: { 'line-color': '#3a3e46', 'line-width': width(3, 10) } },
-      { id: 'nav-line', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': ACCENT, 'line-width': width(5, 16) } },
+      { id: 'nav-line', source: SOURCES.left, type: 'line', layout: round, paint: { 'line-color': ROUTE_COLOR, 'line-width': width(5, 16) } },
       {
         id: 'nav-arrows',
         source: SOURCES.left,
@@ -560,18 +565,14 @@ export function setupDriving(map, traffic, basemap) {
     heading = camBearing = route.line.bearingAt(0);
     camZoom = 17.4;
     follow = true;
-    shownRev = -1;
     setMode('driving');
     applyHudSettings();
     buildSimStops();
     renderButtons();
     ui.recenter.hidden = true;
     carMarker.setLngLat(position).setRotation(heading).addTo(map);
-    // The HUD has to be on screen before its map window can be measured.
-    requestAnimationFrame(() => {
-      applyLayout();
-      map.jumpTo({ center: position, bearing: camBearing, zoom: camZoom });
-    });
+    applyLayout();
+    map.jumpTo({ center: position, bearing: camBearing, zoom: camZoom });
 
     if (!simulated) startGps();
     requestWakeLock();
@@ -832,22 +833,16 @@ export function setupDriving(map, traffic, basemap) {
       });
     }
 
-    // Speed: big number, segmented bar, and the limit sign of this stretch.
+    // Speed: big number, the arc filling up, and past the limit the red zone.
     const seg = line.segmentAt(along);
     const limit = route.limits?.[seg];
     const over = Boolean(limit && kmh > limit + 3);
     ui.speedNum.textContent = Math.round(kmh);
     ui.speedTile.classList.toggle('is-over', over);
-    const lit = Math.round(Math.min(1, kmh / GAUGE_MAX_KMH) * REV_SEGMENTS);
-    const limitAt = limit ? Math.round((limit / GAUGE_MAX_KMH) * REV_SEGMENTS) : REV_SEGMENTS;
-    const revKey = lit * 100 + limitAt;
-    if (revKey !== shownRev) {
-      shownRev = revKey;
-      ui.rev.forEach((segEl, i) => {
-        segEl.classList.toggle('on', i < lit);
-        segEl.classList.toggle('past-limit', i >= limitAt);
-      });
-    }
+    ui.gaugeValue.style.strokeDasharray = `${Math.min(1, kmh / GAUGE_MAX_KMH) * 100} 100`;
+    const limitAt = limit ? Math.min(1, limit / GAUGE_MAX_KMH) * 100 : 100;
+    ui.gaugeZone.style.strokeDasharray = `${100 - limitAt} 100`;
+    ui.gaugeZone.style.strokeDashoffset = `${-limitAt}`;
     ui.limit.hidden = !limit;
     if (limit) {
       const src = iconDataUrl(`tr-speed-${limit}`);
@@ -875,19 +870,10 @@ export function setupDriving(map, traffic, basemap) {
 
   // ---------- Camera follow ----------
 
-  // Fit the camera to the map window: bike centred across it, low down in it.
+  // You sit low on screen, so more of the road ahead is in view.
   function applyLayout() {
-    const box = ui.window.getBoundingClientRect();
     const h = map.getContainer().clientHeight;
-    const w = map.getContainer().clientWidth;
-    const carY = box.top + box.height * CAR_Y;
-    const bottom = Math.max(0, h - box.bottom);
-    map.setPadding({
-      left: Math.max(0, box.left),
-      right: Math.max(0, w - box.right),
-      bottom,
-      top: Math.max(0, 2 * carY - (h - bottom)),
-    });
+    map.setPadding({ top: Math.round(h * (2 * CAR_Y - 1)), bottom: 0, left: 0, right: 0 });
   }
 
   function setFollow(on) {
